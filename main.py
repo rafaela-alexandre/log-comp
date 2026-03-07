@@ -2,27 +2,37 @@ import sys
 
 
 def main():
-    entrada = sys.argv[1]
-
+    entrada = "789   +345  -    123"   # sys.argv[1]
     resultado = processar(entrada)
-
     print(resultado)
 
 
 def processar(texto):
-    texto = texto.replace(" ", "")
+    texto = texto.strip()
 
     if texto == "":
-        raise Exception("Entrada inválida: a string não pode ser vazia")
+        raise Exception("entrada invalida")
 
     numero_atual = ""
     resultado = 0
     sinal = "+"
+    ultimo = "inicio"
 
     for i in texto:
-        if i == "+" or i == "-":
+        if i == " ":
+            if numero_atual != "":
+                ultimo = "numero_espacado"
+            continue
+
+        elif i.isdigit():
+            if ultimo == "numero_espacado":
+                raise Exception("entrada invalida")
+            numero_atual += i
+            ultimo = "numero"
+
+        elif i == "+" or i == "-":
             if numero_atual == "":
-                raise Exception("Entrada inválida: operador sem número")
+                raise Exception("entrada invalida")
 
             if sinal == "+":
                 resultado += int(numero_atual)
@@ -31,15 +41,13 @@ def processar(texto):
 
             numero_atual = ""
             sinal = i
-
-        elif i.isdigit():
-            numero_atual += i
+            ultimo = "operador"
 
         else:
-            raise Exception("Entrada inválida: caractere inválido, apenas números, '+' e '-' são permitidos")
+            raise Exception("entrada invalida")
 
     if numero_atual == "":
-        raise Exception("Entrada inválida: operador sem número")
+        raise Exception("entrada invalida")
 
     if sinal == "+":
         resultado += int(numero_atual)
