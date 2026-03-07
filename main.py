@@ -2,7 +2,7 @@ import sys
 
 
 def main():
-    entrada = "789   +345  -    123"   # sys.argv[1]
+    entrada =  sys.argv[1]
     resultado = processar(entrada)
     print(resultado)
 
