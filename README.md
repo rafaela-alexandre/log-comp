@@ -6,7 +6,8 @@ This repository is monitored by Compiler Tester for automatic compilation status
 ## Diagrama Sintático
 ![alt text](image.png)
 
-```
+#EBNF
+``` ebnf
 EXPRESSION = TERM, { ("+" | "-"), TERM } ;
 TERM = FACTOR, { ("*" | "/"), FACTOR } ;
 FACTOR = ("+" | "-"), FACTOR | "(", EXPRESSION, ")" | NUMBER ;
