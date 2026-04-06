@@ -95,6 +95,8 @@ class BinOp(Node):
         elif self.value == "*":
             return left * right
         elif self.value == "/":
+            if right == 0:
+                raise Exception("[Semantic] Division by zero")
             return left // right
         else:
             raise Exception(f"[Semantic] Unknown binary operator '{self.value}'")
