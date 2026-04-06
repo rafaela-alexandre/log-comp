@@ -45,7 +45,7 @@ class Lexer:
 
 
 class Parser:
-    lexer: Lexer = None
+    lexer = None  # atributo estático
 
     def parse_expression() -> int:
         if Parser.lexer.next.type != "INT":
