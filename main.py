@@ -1,60 +1,91 @@
 import sys
 
 
-def main():
-    entrada =  sys.argv[1]
-    resultado = processar(entrada)
-    print(resultado)
+class Token:
+    def __init__(self, type: str, value):
+        self.type = type
+        self.value = value
 
 
-def processar(texto):
-    texto = texto.strip()
+class Lexer:
+    def __init__(self, source: str):
+        self.source = source
+        self.position = 0
+        self.next = None
 
-    if texto == "":
-        raise Exception("entrada invalida")
+    def select_next(self):
+        # Pula espaços em branco
+        while self.position < len(self.source) and self.source[self.position] == " ":
+            self.position += 1
 
-    numero_atual = ""
-    resultado = 0
-    sinal = "+"
-    ultimo = "inicio"
+        # Fim da entrada
+        if self.position >= len(self.source):
+            self.next = Token("EOF", "")
+            return
 
-    for i in texto:
-        if i == " ":
-            if numero_atual != "":
-                ultimo = "numero_espacado"
-            continue
+        char = self.source[self.position]
 
-        elif i.isdigit():
-            if ultimo == "numero_espacado":
-                raise Exception("entrada invalida")
-            numero_atual += i
-            ultimo = "numero"
+        if char == "+":
+            self.next = Token("PLUS", "+")
+            self.position += 1
 
-        elif i == "+" or i == "-":
-            if numero_atual == "":
-                raise Exception("entrada invalida")
+        elif char == "-":
+            self.next = Token("MINUS", "-")
+            self.position += 1
 
-            if sinal == "+":
-                resultado += int(numero_atual)
-            else:
-                resultado -= int(numero_atual)
-
-            numero_atual = ""
-            sinal = i
-            ultimo = "operador"
+        elif char.isdigit():
+            num = ""
+            while self.position < len(self.source) and self.source[self.position].isdigit():
+                num += self.source[self.position]
+                self.position += 1
+            self.next = Token("INT", int(num))
 
         else:
-            raise Exception("entrada invalida")
+            raise Exception(f"[Lexer] Invalid symbol '{char}'")
 
-    if numero_atual == "":
-        raise Exception("entrada invalida")
 
-    if sinal == "+":
-        resultado += int(numero_atual)
-    else:
-        resultado -= int(numero_atual)
+class Parser:
+    lexer: Lexer = None
 
-    return resultado
+    def parse_expression() -> int:
+        if Parser.lexer.next.type != "INT":
+            raise Exception(f"[Parser] Unexpected token {Parser.lexer.next.type}, expected INT")
+
+        result = Parser.lexer.next.value
+        Parser.lexer.select_next()
+
+        while Parser.lexer.next.type in ("PLUS", "MINUS"):
+            op = Parser.lexer.next.type
+            Parser.lexer.select_next()
+
+            if Parser.lexer.next.type != "INT":
+                raise Exception(f"[Parser] Unexpected token {Parser.lexer.next.type}, expected INT")
+
+            if op == "PLUS":
+                result += Parser.lexer.next.value
+            else:
+                result -= Parser.lexer.next.value
+
+            Parser.lexer.select_next()
+
+        return result
+
+    def run(code: str) -> int:
+        Parser.lexer = Lexer(code)
+        Parser.lexer.select_next()
+
+        result = Parser.parse_expression()
+
+        if Parser.lexer.next.type != "EOF":
+            raise Exception(f"[Parser] Unexpected token {Parser.lexer.next.type}, expected EOF")
+
+        return result
+
+
+def main():
+    code = sys.argv[1]
+    result = Parser.run(code)
+    print(result)
 
 
 if __name__ == "__main__":
