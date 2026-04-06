@@ -20,23 +20,15 @@ class Variable:
 
 class SymbolTable:
     def __init__(self):
-        self._table = {}
+        self.table = {}
 
-    @property
-    def table(self):
-        return self._table
-
-    @table.setter
-    def table(self, value):
-        self._table = value
-
-    def get(self, name: str):
-        if name not in self._table:
+    def get_value(self, name: str):
+        if name not in self.table:
             raise Exception(f"[Semantic] Variable '{name}' not defined")
-        return self._table[name].value
+        return self.table[name].value
 
-    def set(self, name: str, value):
-        self._table[name] = Variable(value)
+    def set_value(self, name: str, value):
+        self.table[name] = Variable(value)
 
 
 class Lexer:
@@ -156,7 +148,7 @@ class Identifier(Node):
         super().__init__(value, children)
 
     def evaluate(self, st):
-        return st.get(self.value)
+        return st.get_value(self.value)
 
 
 class Assignment(Node):
@@ -164,7 +156,7 @@ class Assignment(Node):
         super().__init__(value, children)
 
     def evaluate(self, st):
-        st.set(self.children[0].value, self.children[1].evaluate(st))
+        st.set_value(self.children[0].value, self.children[1].evaluate(st))
 
 
 class Print(Node):
