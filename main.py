@@ -51,75 +51,118 @@ class Lexer:
             raise Exception(f"[Lexer] Invalid symbol '{char}'")
 
 
+class Node:
+    def __init__(self, value, children=None):
+        self.value = value
+        self.children = children if children is not None else []
+
+    def evaluate(self):
+        raise NotImplementedError("[Semantic] evaluate() not implemented")
+
+
+class IntVal(Node):
+    def __init__(self, value):
+        super().__init__(value, [])
+
+    def evaluate(self):
+        return self.value
+
+
+class UnOp(Node):
+    def __init__(self, value, child):
+        super().__init__(value, [child])
+
+    def evaluate(self):
+        if self.value == "+":
+            return +self.children[0].evaluate()
+        elif self.value == "-":
+            return -self.children[0].evaluate()
+        else:
+            raise Exception(f"[Semantic] Unknown unary operator '{self.value}'")
+
+
+class BinOp(Node):
+    def __init__(self, value, left, right):
+        super().__init__(value, [left, right])
+
+    def evaluate(self):
+        left = self.children[0].evaluate()
+        right = self.children[1].evaluate()
+        if self.value == "+":
+            return left + right
+        elif self.value == "-":
+            return left - right
+        elif self.value == "*":
+            return left * right
+        elif self.value == "/":
+            return left // right
+        else:
+            raise Exception(f"[Semantic] Unknown binary operator '{self.value}'")
+
+
 class Parser:
     lexer = None  # atributo estático
 
-    def parse_factor() -> int:
+    def parse_factor() -> Node:
         if Parser.lexer.next.type == "PLUS":
             Parser.lexer.select_next()
-            return +Parser.parse_factor()
+            return UnOp("+", Parser.parse_factor())
 
         elif Parser.lexer.next.type == "MINUS":
             Parser.lexer.select_next()
-            return -Parser.parse_factor()
+            return UnOp("-", Parser.parse_factor())
 
         elif Parser.lexer.next.type == "OPEN_PAR":
             Parser.lexer.select_next()
-            result = Parser.parse_expression()
+            node = Parser.parse_expression()
             if Parser.lexer.next.type != "CLOSE_PAR":
                 raise Exception(f"[Parser] Expected ')' but got {Parser.lexer.next.type}")
             Parser.lexer.select_next()
-            return result
+            return node
 
         elif Parser.lexer.next.type == "INT":
-            result = Parser.lexer.next.value
+            node = IntVal(Parser.lexer.next.value)
             Parser.lexer.select_next()
-            return result
+            return node
 
         else:
             raise Exception(f"[Parser] Unexpected token {Parser.lexer.next.type}, expected factor")
 
-    def parse_term() -> int:
-        result = Parser.parse_factor()
+    def parse_term() -> Node:
+        node = Parser.parse_factor()
 
         while Parser.lexer.next.type in ("MULT", "DIV"):
-            op = Parser.lexer.next.type
+            op = Parser.lexer.next.value
             Parser.lexer.select_next()
-            if op == "MULT":
-                result *= Parser.parse_factor()
-            else:
-                result //= Parser.parse_factor()
+            node = BinOp(op, node, Parser.parse_factor())
 
-        return result
+        return node
 
-    def parse_expression() -> int:
-        result = Parser.parse_term()
+    def parse_expression() -> Node:
+        node = Parser.parse_term()
 
         while Parser.lexer.next.type in ("PLUS", "MINUS"):
-            op = Parser.lexer.next.type
+            op = Parser.lexer.next.value
             Parser.lexer.select_next()
-            if op == "PLUS":
-                result += Parser.parse_term()
-            else:
-                result -= Parser.parse_term()
+            node = BinOp(op, node, Parser.parse_term())
 
-        return result
+        return node
 
-    def run(code: str) -> int:
+    def run(code: str) -> Node:
         Parser.lexer = Lexer(code)
         Parser.lexer.select_next()
 
-        result = Parser.parse_expression()
+        node = Parser.parse_expression()
 
         if Parser.lexer.next.type != "EOF":
             raise Exception(f"[Parser] Unexpected token {Parser.lexer.next.type}, expected EOF")
 
-        return result
+        return node
 
 
 def main():
     code = sys.argv[1]
-    result = Parser.run(code)
+    result = Parser.run(code).evaluate()
     print(result)
 
 
