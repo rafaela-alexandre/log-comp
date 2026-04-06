@@ -7,7 +7,7 @@ This repository is monitored by Compiler Tester for automatic compilation status
 ![alt text](image.png)
 
 #EBNF
-``` ebnf
+```ebnf
 EXPRESSION = TERM, { ("+" | "-"), TERM } ;
 TERM = FACTOR, { ("*" | "/"), FACTOR } ;
 FACTOR = ("+" | "-"), FACTOR | "(", EXPRESSION, ")" | NUMBER ;
