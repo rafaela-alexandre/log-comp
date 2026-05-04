@@ -43,16 +43,20 @@ class SymbolTable:
         self.offset += 4
         self.table[name] = Variable(vartype, None, self.offset)
 
-    def get(self, name: str) -> Variable:
+    def get_variable(self, name: str) -> Variable:
         if name not in self.table:
             raise Exception(f"[Semantic] Variable '{name}' not defined")
         return self.table[name]
 
     def get_value(self, name: str):
-        return self.get(name).value
+        if name not in self.table:
+            raise Exception(f"[Semantic] Variable '{name}' not defined")
+        return self.table[name].value
 
     def set_value(self, name: str, value, vartype: str = None):
-        var = self.get(name)
+        if name not in self.table:
+            raise Exception(f"[Semantic] Variable '{name}' not defined")
+        var = self.table[name]
         if vartype is not None and var.vartype != vartype:
             raise Exception(
                 f"[Semantic] Type mismatch for '{name}': expected {var.vartype}, got {vartype}"
@@ -237,12 +241,12 @@ class Lexer:
 # ─────────────────────────────────────────────
 
 class Node:
-    _id = 0
+    id = 0
 
     @staticmethod
     def new_id() -> int:
-        Node._id += 1
-        return Node._id
+        Node.id += 1
+        return Node.id
 
     def __init__(self, value, children=None):
         self.value    = value
@@ -294,10 +298,10 @@ class Identifier(Node):
         super().__init__(value, children)
 
     def evaluate(self, st):
-        return st.get(self.value)
+        return st.get_variable(self.value)
 
     def generate(self, st):
-        var = st.get(self.value)
+        var = st.get_variable(self.value)
         Code.append(f"  mov eax, [ebp-{var.shift}] ; {self.value}")
 
 
@@ -459,7 +463,7 @@ class VarDec(Node):
     def generate(self, st):
         name = self.children[0].value
         st.create_variable(name, self.value)
-        var = st.get(name)
+        var = st.get_variable(name)
         Code.append(f"  sub esp, 4 ; var {name} {self.value} [EBP-{var.shift}]")
         if len(self.children) > 1:
             self.children[1].generate(st)
@@ -476,7 +480,7 @@ class Assignment(Node):
 
     def generate(self, st):
         self.children[1].generate(st)
-        var = st.get(self.children[0].value)
+        var = st.get_variable(self.children[0].value)
         Code.append(f"  mov [ebp-{var.shift}], eax ; {self.children[0].value} = ...")
 
 
@@ -595,10 +599,6 @@ class NoOp(Node):
 class Parser:
     lexer = None  # atributo estatico
 
-    def _skip_ends():
-        while Parser.lexer.next.type == "END":
-            Parser.lexer.select_next()
-
     def parse_factor() -> Node:
         tok = Parser.lexer.next
 
@@ -692,12 +692,12 @@ class Parser:
     def parse_block() -> Node:
         """Statements ate CLOSE_BRA (end) ou ELSE"""
         children = []
-        Parser._skip_ends()
+        while Parser.lexer.next.type == "END": Parser.lexer.select_next()
         while Parser.lexer.next.type not in ("CLOSE_BRA", "ELSE", "EOF"):
             stmt = Parser.parse_statement()
             if stmt:
                 children.append(stmt)
-            Parser._skip_ends()
+            while Parser.lexer.next.type == "END": Parser.lexer.select_next()
         return Block(None, children)
 
     def parse_statement() -> Node:
@@ -806,12 +806,12 @@ class Parser:
 
     def parse_program() -> Node:
         children = []
-        Parser._skip_ends()
+        while Parser.lexer.next.type == "END": Parser.lexer.select_next()
         while Parser.lexer.next.type != "EOF":
             stmt = Parser.parse_statement()
             if stmt:
                 children.append(stmt)
-            Parser._skip_ends()
+            while Parser.lexer.next.type == "END": Parser.lexer.select_next()
         return Block(None, children)
 
     def run(code: str) -> Node:
