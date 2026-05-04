@@ -712,6 +712,16 @@ class Parser:
                 Parser.lexer.select_next()
             return node
 
+        elif tok.type == "OPEN_BRA":
+            Parser.lexer.select_next()
+            block = Parser.parse_block()
+            if Parser.lexer.next.type != "CLOSE_BRA":
+                raise Exception("[Parser] Expected 'end' to close 'do'")
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type == "END":
+                Parser.lexer.select_next()
+            return block
+
         elif tok.type == "WHILE":
             Parser.lexer.select_next()
             if Parser.lexer.next.type != "OPEN_PAR":
