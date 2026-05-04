@@ -43,11 +43,6 @@ class SymbolTable:
         self.offset += 4
         self.table[name] = Variable(vartype, None, self.offset)
 
-    def get_variable(self, name: str) -> Variable:
-        if name not in self.table:
-            raise Exception(f"[Semantic] Variable '{name}' not defined")
-        return self.table[name]
-
     def get_value(self, name: str):
         if name not in self.table:
             raise Exception(f"[Semantic] Variable '{name}' not defined")
@@ -298,10 +293,10 @@ class Identifier(Node):
         super().__init__(value, children)
 
     def evaluate(self, st):
-        return st.get_variable(self.value)
+        return st.table[self.value] if self.value in st.table else (_ for _ in ()).throw(Exception(f"[Semantic] Variable '{self.value}' not defined"))
 
     def generate(self, st):
-        var = st.get_variable(self.value)
+        var = st.table[self.value] if self.value in st.table else (_ for _ in ()).throw(Exception(f"[Semantic] Variable '{self.value}' not defined"))
         Code.append(f"  mov eax, [ebp-{var.shift}] ; {self.value}")
 
 
@@ -463,7 +458,7 @@ class VarDec(Node):
     def generate(self, st):
         name = self.children[0].value
         st.create_variable(name, self.value)
-        var = st.get_variable(name)
+        var = st.table[name]
         Code.append(f"  sub esp, 4 ; var {name} {self.value} [EBP-{var.shift}]")
         if len(self.children) > 1:
             self.children[1].generate(st)
@@ -480,7 +475,7 @@ class Assignment(Node):
 
     def generate(self, st):
         self.children[1].generate(st)
-        var = st.get_variable(self.children[0].value)
+        var = st.table[self.children[0].value]
         Code.append(f"  mov [ebp-{var.shift}], eax ; {self.children[0].value} = ...")
 
 
