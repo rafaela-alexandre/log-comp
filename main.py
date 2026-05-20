@@ -199,6 +199,12 @@ class Lexer:
         elif char == ">":
             self.next = Token("GT", ">")
             self.position += 1
+        elif char == ".":
+            if self.position + 1 < len(self.source) and self.source[self.position + 1] == ".":
+                self.next = Token("CONCAT", "..")
+                self.position += 2
+            else:
+                raise Exception(f"[Lexer] Invalid symbol '.' at position {self.position}")
         elif char == '"':
             self.position += 1
             s = ""
@@ -355,6 +361,11 @@ class BinOp(Node):
             elif op == "<": res = left.value <  right.value
             else:           res = left.value >  right.value
             return Variable("boolean", res)
+        if op == "..":
+            def _tostr(v):
+                if v.vartype == "boolean": return "true" if v.value else "false"
+                return str(v.value)
+            return Variable("string", _tostr(left) + _tostr(right))
         if left.vartype == "string" or right.vartype == "string":
             if op == "+":
                 return Variable("string", str(left.value) + str(right.value))
@@ -442,6 +453,10 @@ class VarDec(Node):
         st.create_variable(name, self.value, is_func=False)
         if len(self.children) > 1:
             result = self.children[1].evaluate(st)
+            if result.vartype != self.value:
+                raise Exception(
+                    f"[Semantic] Type mismatch: cannot assign {result.vartype} to {self.value} variable '{name}'"
+                )
             st.set_value(name, result.value, result.vartype)
 
     def generate(self, st):
@@ -474,7 +489,12 @@ class Print(Node):
 
     def evaluate(self, st):
         result = self.children[0].evaluate(st)
-        print(result.value)
+        if result.vartype == "boolean":
+            print("true" if result.value else "false")
+        elif result.vartype == "string":
+            print(result.value)
+        else:
+            print(result.value)
 
     def generate(self, st):
         self.children[0].generate(st)
@@ -505,6 +525,8 @@ class If(Node):
 
     def evaluate(self, st):
         cond = self.children[0].evaluate(st)
+        if cond.vartype != "boolean":
+            raise Exception("[Semantic] 'if' condition must be boolean")
         if cond.value:
             result = self.children[1].evaluate(st)
             if result is not None:
@@ -538,6 +560,8 @@ class While(Node):
     def evaluate(self, st):
         while True:
             cond = self.children[0].evaluate(st)
+            if cond.vartype != "boolean":
+                raise Exception("[Semantic] 'while' condition must be boolean")
             if not cond.value:
                 break
             result = self.children[1].evaluate(st)
@@ -687,6 +711,9 @@ class FuncCall(Node):
 #  PARSER
 # ─────────────────────────────────────────────
 
+_parser_func_depth = 0
+
+
 class Parser:
     lexer = None
 
@@ -701,7 +728,7 @@ class Parser:
             return UnOp("-", [Parser.parse_factor()])
         elif tok.type == "NOT":
             Parser.lexer.select_next()
-            return UnOp("not", [Parser.parse_factor()])
+            return UnOp("not", [Parser.parse_factor()])  # recursive: handles not not not x
         elif tok.type == "OPEN_PAR":
             Parser.lexer.select_next()
             node = Parser.parse_bool_expression()
@@ -764,6 +791,12 @@ class Parser:
 
     def parse_rel_expression() -> Node:
         node = Parser.parse_expression()
+        # Handle string concatenation (..) - right-associative
+        if Parser.lexer.next.type == "CONCAT":
+            Parser.lexer.select_next()
+            right = Parser.parse_rel_expression()
+            node = BinOp("..", [node, right])
+            return node
         if Parser.lexer.next.type in ("EQ", "LT", "GT"):
             op = Parser.lexer.next.value
             Parser.lexer.select_next()
@@ -858,7 +891,10 @@ class Parser:
         while Parser.lexer.next.type == "END":
             Parser.lexer.select_next()
 
+        global _parser_func_depth
+        _parser_func_depth += 1
         body = Parser.parse_block()
+        _parser_func_depth -= 1
 
         if Parser.lexer.next.type != "CLOSE_BRA":
             raise Exception("[Parser] Expected 'end' to close function declaration")
