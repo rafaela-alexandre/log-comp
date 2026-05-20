@@ -690,24 +690,6 @@ class FuncCall(Node):
 class Parser:
     lexer = None
 
-    # Guarda o nome do identificador atual para parse_func_call usar
-    _current_iden = None
-
-    def parse_func_call() -> Node:
-        """Consome '(' args ')' usando Parser._current_iden como nome da função."""
-        name = Parser._current_iden
-        Parser.lexer.select_next()  # consume '('
-        args = []
-        if Parser.lexer.next.type != "CLOSE_PAR":
-            args.append(Parser.parse_bool_expression())
-            while Parser.lexer.next.type == "COMMA":
-                Parser.lexer.select_next()
-                args.append(Parser.parse_bool_expression())
-        if Parser.lexer.next.type != "CLOSE_PAR":
-            raise Exception(f"[Parser] Expected ')' in function call, got {Parser.lexer.next.type}")
-        Parser.lexer.select_next()  # consume ')'
-        return FuncCall(name, args)
-
     def parse_factor() -> Node:
         tok = Parser.lexer.next
 
@@ -746,11 +728,21 @@ class Parser:
             Parser.lexer.select_next()
             return Read(None, [])
         elif tok.type == "IDEN":
-            Parser._current_iden = tok.value
+            name = tok.value
             Parser.lexer.select_next()
             if Parser.lexer.next.type == "OPEN_PAR":
-                return Parser.parse_func_call()
-            return Identifier(tok.value, [])
+                Parser.lexer.select_next()  # consume '('
+                args = []
+                if Parser.lexer.next.type != "CLOSE_PAR":
+                    args.append(Parser.parse_bool_expression())
+                    while Parser.lexer.next.type == "COMMA":
+                        Parser.lexer.select_next()
+                        args.append(Parser.parse_bool_expression())
+                if Parser.lexer.next.type != "CLOSE_PAR":
+                    raise Exception(f"[Parser] Expected ')' in function call, got {Parser.lexer.next.type}")
+                Parser.lexer.select_next()  # consume ')'
+                return FuncCall(name, args)
+            return Identifier(name, [])
         else:
             raise Exception(f"[Parser] Unexpected token '{tok.type}' ({tok.value!r}), expected factor")
 
@@ -965,7 +957,6 @@ class Parser:
 
         elif tok.type == "IDEN":
             name = tok.value
-            Parser._current_iden = name
             Parser.lexer.select_next()
             if Parser.lexer.next.type == "ASSIGN":
                 Parser.lexer.select_next()
@@ -974,10 +965,19 @@ class Parser:
                     Parser.lexer.select_next()
                 return Assignment(None, [Identifier(name, []), expr])
             elif Parser.lexer.next.type == "OPEN_PAR":
-                call_node = Parser.parse_func_call()
+                Parser.lexer.select_next()  # consume '('
+                args = []
+                if Parser.lexer.next.type != "CLOSE_PAR":
+                    args.append(Parser.parse_bool_expression())
+                    while Parser.lexer.next.type == "COMMA":
+                        Parser.lexer.select_next()
+                        args.append(Parser.parse_bool_expression())
+                if Parser.lexer.next.type != "CLOSE_PAR":
+                    raise Exception(f"[Parser] Expected ')' in function call, got {Parser.lexer.next.type}")
+                Parser.lexer.select_next()  # consume ')'
                 if Parser.lexer.next.type == "END":
                     Parser.lexer.select_next()
-                return call_node
+                return FuncCall(name, args)
             else:
                 raise Exception(
                     f"[Parser] Expected '=' or '(' after identifier '{name}', "
