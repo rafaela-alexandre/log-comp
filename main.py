@@ -921,6 +921,26 @@ class Parser:
         children = [Identifier(func_name, [])] + params + [body]
         return FuncDec(ret_type, children)
 
+    def parse_var_declaration() -> Node:
+        """Consome 'local' e retorna um nó VarDec."""
+        Parser.lexer.select_next()  # consume 'local'
+        if Parser.lexer.next.type != "IDEN":
+            raise Exception("[Parser] Expected identifier after 'local'")
+        name = Parser.lexer.next.value
+        Parser.lexer.select_next()
+        if Parser.lexer.next.type != "TYPE":
+            raise Exception("[Parser] Expected type after identifier in declaration")
+        vartype = Parser.lexer.next.value
+        Parser.lexer.select_next()
+        ident = Identifier(name, [])
+        node  = VarDec(vartype, [ident])
+        if Parser.lexer.next.type == "ASSIGN":
+            Parser.lexer.select_next()
+            node.children.append(Parser.parse_bool_expression())
+        if Parser.lexer.next.type == "END":
+            Parser.lexer.select_next()
+        return node
+
     def parse_statement() -> Node:
         tok = Parser.lexer.next
 
@@ -936,23 +956,7 @@ class Parser:
             return Return(None, [expr])
 
         elif tok.type == "VAR":
-            Parser.lexer.select_next()
-            if Parser.lexer.next.type != "IDEN":
-                raise Exception("[Parser] Expected identifier after 'local'")
-            name = Parser.lexer.next.value
-            Parser.lexer.select_next()
-            if Parser.lexer.next.type != "TYPE":
-                raise Exception("[Parser] Expected type after identifier in declaration")
-            vartype = Parser.lexer.next.value
-            Parser.lexer.select_next()
-            ident = Identifier(name, [])
-            node  = VarDec(vartype, [ident])
-            if Parser.lexer.next.type == "ASSIGN":
-                Parser.lexer.select_next()
-                node.children.append(Parser.parse_bool_expression())
-            if Parser.lexer.next.type == "END":
-                Parser.lexer.select_next()
-            return node
+            return Parser.parse_var_declaration()
 
         elif tok.type == "IF":
             Parser.lexer.select_next()
