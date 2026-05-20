@@ -28,17 +28,17 @@ class PrePro:
 
 class Variable:
     def __init__(self, vartype: str, value=None, shift: int = 0, is_func: bool = False):
-        self.vartype = vartype   # "number", "string", "boolean", or return type for funcs
+        self.vartype = vartype
         self.value   = value
-        self.shift   = shift     # deslocamento relativo ao EBP
-        self.is_func = is_func   # True se é uma função
+        self.shift   = shift
+        self.is_func = is_func
 
 
 class SymbolTable:
     def __init__(self, parent=None):
         self.table  = {}
         self.offset = 0
-        self.parent = parent  # tabela pai (escopo externo)
+        self.parent = parent
 
     def create_variable(self, name: str, vartype: str, is_func: bool = False):
         if name in self.table:
@@ -46,19 +46,14 @@ class SymbolTable:
         self.offset += 4
         self.table[name] = Variable(vartype, None, self.offset, is_func)
 
-    def get_variable(self, name: str) -> Variable:
-        """Busca recursiva: escopo local → pai → ... → global"""
+    def get_value(self, name: str):
         if name in self.table:
             return self.table[name]
         if self.parent is not None:
-            return self.parent.get_variable(name)
+            return self.parent.get_value(name)
         raise Exception(f"[Semantic] Variable '{name}' not defined")
 
-    def get_value(self, name: str):
-        return self.get_variable(name).value
-
     def set_value(self, name: str, value, vartype: str = None):
-        """Busca recursiva para encontrar onde a variável foi declarada"""
         if name in self.table:
             var = self.table[name]
             if vartype is not None and var.vartype != vartype:
@@ -153,8 +148,8 @@ class Lexer:
         "number":   "TYPE",
         "string":   "TYPE",
         "boolean":  "TYPE",
-        "function": "FUNC",    # NOVO
-        "return":   "RETURN",  # NOVO
+        "function": "FUNC",
+        "return":   "RETURN",
     }
 
     def select_next(self):
@@ -189,7 +184,7 @@ class Lexer:
             self.next = Token("CLOSE_PAR", ")")
             self.position += 1
         elif char == ",":
-            self.next = Token("COMMA", ",")   # NOVO
+            self.next = Token("COMMA", ",")
             self.position += 1
         elif char == "=":
             if self.position + 1 < len(self.source) and self.source[self.position + 1] == "=":
@@ -234,15 +229,6 @@ class Lexer:
                 self.next = Token(tt, iden)
         else:
             raise Exception(f"[Lexer] Invalid symbol '{char}' at position {self.position}")
-
-
-# ─────────────────────────────────────────────
-#  SENTINEL: sinaliza um return propagando pela pilha
-# ─────────────────────────────────────────────
-
-class ReturnSignal(Exception):
-    def __init__(self, value: Variable):
-        self.value = value
 
 
 # ─────────────────────────────────────────────
@@ -299,7 +285,7 @@ class StringVal(Node):
         return Variable("string", self.value)
 
     def generate(self, st):
-        pass  # strings nao geram codigo assembly
+        pass
 
 
 class Identifier(Node):
@@ -307,10 +293,10 @@ class Identifier(Node):
         super().__init__(value, children)
 
     def evaluate(self, st):
-        return st.get_variable(self.value)
+        return st.get_value(self.value)
 
     def generate(self, st):
-        var = st.get_variable(self.value)
+        var = st.get_value(self.value)
         Code.append(f"  mov eax, [ebp-{var.shift}] ; {self.value}")
 
 
@@ -453,7 +439,6 @@ class VarDec(Node):
 
     def evaluate(self, st):
         name = self.children[0].value
-        # is_func=False: variável comum (não é função)
         st.create_variable(name, self.value, is_func=False)
         if len(self.children) > 1:
             result = self.children[1].evaluate(st)
@@ -479,7 +464,7 @@ class Assignment(Node):
 
     def generate(self, st):
         self.children[1].generate(st)
-        var = st.get_variable(self.children[0].value)
+        var = st.get_value(self.children[0].value)
         Code.append(f"  mov [ebp-{var.shift}], eax ; {self.children[0].value} = ...")
 
 
@@ -522,7 +507,6 @@ class If(Node):
         cond = self.children[0].evaluate(st)
         if cond.value:
             result = self.children[1].evaluate(st)
-            # Propaga return se o bloco retornou algo
             if result is not None:
                 return result
         elif len(self.children) > 2:
@@ -557,7 +541,6 @@ class While(Node):
             if not cond.value:
                 break
             result = self.children[1].evaluate(st)
-            # Propaga return se o bloco retornou algo
             if result is not None:
                 return result
         return None
@@ -574,23 +557,16 @@ class While(Node):
 
 
 class Block(Node):
-    """
-    Executa statements em ordem.
-    - Quando um filho é outro Block (do...end), cria nova SymbolTable encadeada.
-    - Quando um filho retorna um valor (via Return), para e propaga.
-    """
     def __init__(self, value, children):
         super().__init__(value, children)
 
     def evaluate(self, st):
         for child in self.children:
             if isinstance(child, Block):
-                # Novo escopo encadeado para blocos aninhados
                 inner_st = SymbolTable(parent=st)
                 result = child.evaluate(inner_st)
             else:
                 result = child.evaluate(st)
-            # Se o filho retornou um valor (via Return ou bloco aninhado), propaga
             if result is not None:
                 return result
         return None
@@ -611,46 +587,30 @@ class NoOp(Node):
         pass
 
 
-# ─────────────────────────────────────────────
-#  NOVOS NÓS: Return, FuncDec, FuncCall
-# ─────────────────────────────────────────────
-
 class Return(Node):
-    """
-    return <expr>
-    Avalia o filho e levanta ReturnSignal para interromper o bloco.
-    """
     def __init__(self, value, children):
         super().__init__(value, children)
 
     def evaluate(self, st):
-        result = self.children[0].evaluate(st)
-        # Retorna o Variable diretamente — o Block trata a propagação
-        return result
+        return self.children[0].evaluate(st)
 
     def generate(self, st):
-        # Geração de código para return não implementada neste roteiro
         raise NotImplementedError("[CodeGen] Return.generate() not implemented")
 
 
 class FuncDec(Node):
     """
-    function nome(params) rettype
-      ...
-    end
-
-    children[0]     = Identifier (nome da função)
-    children[1..n]  = VarDec (parâmetros)
-    children[-1]    = Block (corpo)
-    value           = tipo de retorno (str ou None para void)
+    value      = tipo de retorno (str ou None para void)
+    children[0]    = Identifier (nome)
+    children[1..n] = VarDec (parametros)
+    children[-1]   = Block (corpo)
     """
     def __init__(self, value, children):
         super().__init__(value, children)
 
     def evaluate(self, st):
         func_name = self.children[0].value
-        # Registra a função na SymbolTable como uma "variável" cujo valor é o próprio nó
-        ret_type = self.value if self.value else "void"
+        ret_type  = self.value if self.value else "void"
         st.create_variable(func_name, ret_type, is_func=True)
         st.set_value(func_name, self)
 
@@ -660,8 +620,6 @@ class FuncDec(Node):
 
 class FuncCall(Node):
     """
-    nome(arg1, arg2, ...)
-
     value    = nome da função (str)
     children = expressões dos argumentos
     """
@@ -671,37 +629,31 @@ class FuncCall(Node):
     def evaluate(self, st):
         func_name = self.value
 
-        # 1. Verifica se foi declarada
         try:
-            var = st.get_variable(func_name)
+            var = st.get_value(func_name)
         except Exception:
             raise Exception(f"[Semantic] Function '{func_name}' not defined")
 
         if not var.is_func:
             raise Exception(f"[Semantic] '{func_name}' is not a function")
 
-        func_dec = var.value  # referência ao nó FuncDec
+        func_dec = var.value
         if not isinstance(func_dec, FuncDec):
             raise Exception(f"[Semantic] '{func_name}' has no valid declaration")
 
-        # Parâmetros: children[1:-1] do FuncDec (todos menos Identifier e Block)
-        param_nodes = func_dec.children[1:-1]   # VarDec de cada parâmetro
-        arg_nodes   = self.children              # expressões passadas na chamada
+        param_nodes  = func_dec.children[1:-1]
+        arg_nodes    = self.children
 
-        # 2. Verifica número de argumentos
         if len(arg_nodes) != len(param_nodes):
             raise Exception(
                 f"[Semantic] Function '{func_name}' expects {len(param_nodes)} argument(s), "
                 f"got {len(arg_nodes)}"
             )
 
-        # 3. Avalia os argumentos no escopo atual (antes de criar o novo escopo)
         evaluated_args = [arg.evaluate(st) for arg in arg_nodes]
 
-        # 4. Cria nova SymbolTable encadeada (pai = st atual)
         func_st = SymbolTable(parent=st)
 
-        # 5. Declara os parâmetros e atribui os valores
         for param, val in zip(param_nodes, evaluated_args):
             param_name = param.children[0].value
             param_type = param.value
@@ -713,13 +665,10 @@ class FuncCall(Node):
             func_st.create_variable(param_name, param_type)
             func_st.set_value(param_name, val.value)
 
-        # 6. Executa o bloco da função
-        body = func_dec.children[-1]  # Block
+        body   = func_dec.children[-1]
         result = body.evaluate(func_st)
 
-        # 7. Trata o retorno
-        ret_type = func_dec.value  # tipo de retorno declarado (ou None para void)
-
+        ret_type = func_dec.value
         if ret_type and ret_type != "void":
             if result is None:
                 raise Exception(f"[Semantic] Function '{func_name}' must return a value of type {ret_type}")
@@ -728,9 +677,7 @@ class FuncCall(Node):
                     f"[Semantic] Function '{func_name}' must return {ret_type}, got {result.vartype}"
                 )
             return result
-        else:
-            # void: retorna None (sem valor)
-            return None
+        return None
 
     def generate(self, st):
         raise NotImplementedError("[CodeGen] FuncCall.generate() not implemented")
@@ -742,6 +689,24 @@ class FuncCall(Node):
 
 class Parser:
     lexer = None
+
+    # Guarda o nome do identificador atual para parse_func_call usar
+    _current_iden = None
+
+    def parse_func_call() -> Node:
+        """Consome '(' args ')' usando Parser._current_iden como nome da função."""
+        name = Parser._current_iden
+        Parser.lexer.select_next()  # consume '('
+        args = []
+        if Parser.lexer.next.type != "CLOSE_PAR":
+            args.append(Parser.parse_bool_expression())
+            while Parser.lexer.next.type == "COMMA":
+                Parser.lexer.select_next()
+                args.append(Parser.parse_bool_expression())
+        if Parser.lexer.next.type != "CLOSE_PAR":
+            raise Exception(f"[Parser] Expected ')' in function call, got {Parser.lexer.next.type}")
+        Parser.lexer.select_next()  # consume ')'
+        return FuncCall(name, args)
 
     def parse_factor() -> Node:
         tok = Parser.lexer.next
@@ -781,28 +746,13 @@ class Parser:
             Parser.lexer.select_next()
             return Read(None, [])
         elif tok.type == "IDEN":
-            name = tok.value
+            Parser._current_iden = tok.value
             Parser.lexer.select_next()
-            # Chamada de função dentro de expressão: nome(args...)
             if Parser.lexer.next.type == "OPEN_PAR":
-                return Parser._parse_func_call(name)
-            return Identifier(name, [])
+                return Parser.parse_func_call()
+            return Identifier(tok.value, [])
         else:
             raise Exception(f"[Parser] Unexpected token '{tok.type}' ({tok.value!r}), expected factor")
-
-    def _parse_func_call(name: str) -> Node:
-        """Consome '(' args ')' e retorna FuncCall. Assume que '(' ainda não foi consumido."""
-        Parser.lexer.select_next()  # consume '('
-        args = []
-        if Parser.lexer.next.type != "CLOSE_PAR":
-            args.append(Parser.parse_bool_expression())
-            while Parser.lexer.next.type == "COMMA":
-                Parser.lexer.select_next()
-                args.append(Parser.parse_bool_expression())
-        if Parser.lexer.next.type != "CLOSE_PAR":
-            raise Exception(f"[Parser] Expected ')' in function call, got {Parser.lexer.next.type}")
-        Parser.lexer.select_next()  # consume ')'
-        return FuncCall(name, args)
 
     def parse_term() -> Node:
         node = Parser.parse_factor()
@@ -852,15 +802,26 @@ class Parser:
             while Parser.lexer.next.type == "END": Parser.lexer.select_next()
         return Block(None, children)
 
-    def parse_func_declaration() -> Node:
-        """
-        function nome(params) rettype
-          statements
-        end
+    def parse_var_declaration() -> Node:
+        Parser.lexer.select_next()  # consume 'local'
+        if Parser.lexer.next.type != "IDEN":
+            raise Exception("[Parser] Expected identifier after 'local'")
+        name = Parser.lexer.next.value
+        Parser.lexer.select_next()
+        if Parser.lexer.next.type != "TYPE":
+            raise Exception("[Parser] Expected type after identifier in declaration")
+        vartype = Parser.lexer.next.value
+        Parser.lexer.select_next()
+        ident = Identifier(name, [])
+        node  = VarDec(vartype, [ident])
+        if Parser.lexer.next.type == "ASSIGN":
+            Parser.lexer.select_next()
+            node.children.append(Parser.parse_bool_expression())
+        if Parser.lexer.next.type == "END":
+            Parser.lexer.select_next()
+        return node
 
-        FuncDec.value    = rettype (str ou None para void)
-        FuncDec.children = [Identifier, VarDec*, Block]
-        """
+    def parse_func_declaration() -> Node:
         Parser.lexer.select_next()  # consume 'function'
 
         if Parser.lexer.next.type != "IDEN":
@@ -872,7 +833,6 @@ class Parser:
             raise Exception("[Parser] Expected '(' after function name")
         Parser.lexer.select_next()
 
-        # Parâmetros: (id type, id type, ...)
         params = []
         if Parser.lexer.next.type == "IDEN":
             param_name = Parser.lexer.next.value
@@ -898,17 +858,14 @@ class Parser:
             raise Exception("[Parser] Expected ')' after function parameters")
         Parser.lexer.select_next()
 
-        # Tipo de retorno (opcional — void se ausente)
         ret_type = None
         if Parser.lexer.next.type == "TYPE":
             ret_type = Parser.lexer.next.value
             Parser.lexer.select_next()
 
-        # Pula newlines antes do corpo
         while Parser.lexer.next.type == "END":
             Parser.lexer.select_next()
 
-        # Corpo da função (statements até 'end')
         body = Parser.parse_block()
 
         if Parser.lexer.next.type != "CLOSE_BRA":
@@ -920,26 +877,6 @@ class Parser:
 
         children = [Identifier(func_name, [])] + params + [body]
         return FuncDec(ret_type, children)
-
-    def parse_var_declaration() -> Node:
-        """Consome 'local' e retorna um nó VarDec."""
-        Parser.lexer.select_next()  # consume 'local'
-        if Parser.lexer.next.type != "IDEN":
-            raise Exception("[Parser] Expected identifier after 'local'")
-        name = Parser.lexer.next.value
-        Parser.lexer.select_next()
-        if Parser.lexer.next.type != "TYPE":
-            raise Exception("[Parser] Expected type after identifier in declaration")
-        vartype = Parser.lexer.next.value
-        Parser.lexer.select_next()
-        ident = Identifier(name, [])
-        node  = VarDec(vartype, [ident])
-        if Parser.lexer.next.type == "ASSIGN":
-            Parser.lexer.select_next()
-            node.children.append(Parser.parse_bool_expression())
-        if Parser.lexer.next.type == "END":
-            Parser.lexer.select_next()
-        return node
 
     def parse_statement() -> Node:
         tok = Parser.lexer.next
@@ -1028,17 +965,16 @@ class Parser:
 
         elif tok.type == "IDEN":
             name = tok.value
+            Parser._current_iden = name
             Parser.lexer.select_next()
             if Parser.lexer.next.type == "ASSIGN":
-                # Atribuição: x = expr
                 Parser.lexer.select_next()
                 expr = Parser.parse_bool_expression()
                 if Parser.lexer.next.type == "END":
                     Parser.lexer.select_next()
                 return Assignment(None, [Identifier(name, []), expr])
             elif Parser.lexer.next.type == "OPEN_PAR":
-                # Chamada de função como statement: nome(args)
-                call_node = Parser._parse_func_call(name)
+                call_node = Parser.parse_func_call()
                 if Parser.lexer.next.type == "END":
                     Parser.lexer.select_next()
                 return call_node
@@ -1052,10 +988,6 @@ class Parser:
             raise Exception(f"[Parser] Unexpected token '{tok.type}' ({tok.value!r}) in statement")
 
     def parse_program() -> Node:
-        """
-        PROGRAM = { FUNCDEC | STATEMENT }
-        Funções são declaradas no nível global; statements também.
-        """
         children = []
         while Parser.lexer.next.type == "END": Parser.lexer.select_next()
         while Parser.lexer.next.type != "EOF":
