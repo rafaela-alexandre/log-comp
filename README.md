@@ -8,17 +8,19 @@ This repository is monitored by Compiler Tester for automatic compilation status
 
 ## EBNF
 ```ebnf
-PROGRAM        = { STATEMENT } ;
-BLOCK          = { STATEMENT } ;
+PROGRAM        = { FUNCDEC | STATEMENT } ;
+FUNCDEC        = "function", IDENTIFIER, "(", [ IDENTIFIER, TYPE, { ",", IDENTIFIER, TYPE } ], ")", [ TYPE ], "\n", { STATEMENT }, "end" ;
+BLOCK          = "do", "\n", { STATEMENT }, "end" ;
 STATEMENT      = ( VARDEC
                  | IMUTDEC
-                 | (IDENTIFIER, "=", BOOLEXPRESSION)
+                 | IDENTIFIER, ( "=", BOOLEXPRESSION | "(", [ BOOLEXPRESSION, { ",", BOOLEXPRESSION } ], ")" )
                  | ("if", BOOLEXPRESSION, "then", "\n", BLOCK, ["else", "\n", BLOCK], "end")
                  | ("print", "(", BOOLEXPRESSION, ")")
                  | ("while", BOOLEXPRESSION, "do", "\n", BLOCK, "end")
                  | ("for", IDENTIFIER, "=", EXPRESSION, ",", EXPRESSION, [",", EXPRESSION], "do", "\n", BLOCK, "end")
                  | ("repeat", "\n", BLOCK, "until", BOOLEXPRESSION)
-                 | ("do", "\n", BLOCK, "end")
+                 | BLOCK
+                 | "return", BOOLEXPRESSION
                  | Ε ), EOL ;
 VARDEC         = "local", IDENTIFIER, TYPE, ["=", BOOLEXPRESSION] ;
 IMUTDEC        = "imut", IDENTIFIER, "=", BOOLEXPRESSION ;
@@ -32,7 +34,8 @@ TERM           = FACTOR, { ("*" | "/"), FACTOR } ;
 FACTOR         = ("+"|"-"), FACTOR | "(", TYPE, ")", FACTOR | "read", "(", ")" | POWER ;
 POWER          = ATOM, ["**", FACTOR] ;
 ATOM           = "(", BOOLEXPRESSION, ")"
-               | INT | FLOAT | BOOL | STR | IDENTIFIER
+               | INT | FLOAT | BOOL | STR
+               | IDENTIFIER, [ "(", [ BOOLEXPRESSION, { ",", BOOLEXPRESSION } ], ")" ]
                | ("if", BOOLEXPRESSION, "then", BOOLEXPRESSION, "else", BOOLEXPRESSION, "end") ;
 TYPE           = "number" | "string" | "boolean" | "float" ;
 BOOL           = "true" | "false" ;
