@@ -847,6 +847,9 @@ class Parser:
         return node
 
     def parse_func_declaration() -> Node:
+        global _parser_func_depth
+        if _parser_func_depth > 0:
+            raise Exception("[Parser] Cannot define a function inside another function")
         Parser.lexer.select_next()  # consume 'function'
 
         if Parser.lexer.next.type != "IDEN":
@@ -891,7 +894,6 @@ class Parser:
         while Parser.lexer.next.type == "END":
             Parser.lexer.select_next()
 
-        global _parser_func_depth
         _parser_func_depth += 1
         body = Parser.parse_block()
         _parser_func_depth -= 1
