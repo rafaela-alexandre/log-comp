@@ -3,35 +3,24 @@ import re
 import os
 
 
-# ─────────────────────────────────────────────
-#  TOKEN
-# ─────────────────────────────────────────────
-
 class Token:
     def __init__(self, type: str, value):
         self.type = type
         self.value = value
 
 
-# ─────────────────────────────────────────────
-#  PRE-PROCESSOR
-# ─────────────────────────────────────────────
-
 class PrePro:
     def filter(code: str) -> str:
         return re.sub(r'--[^\n]*', '', code)
 
 
-# ─────────────────────────────────────────────
-#  VARIABLE & SYMBOL TABLE
-# ─────────────────────────────────────────────
-
 class Variable:
-    def __init__(self, vartype: str, value=None, shift: int = 0, is_func: bool = False):
-        self.vartype = vartype
-        self.value   = value
-        self.shift   = shift
-        self.is_func = is_func
+    def __init__(self, vartype: str, value=None, shift: int = 0, is_func: bool = False, is_struct: bool = False):
+        self.vartype   = vartype
+        self.value     = value
+        self.shift     = shift
+        self.is_func   = is_func
+        self.is_struct = is_struct  # True se for declaração de struct (molde)
 
 
 class SymbolTable:
@@ -40,11 +29,11 @@ class SymbolTable:
         self.offset = 0
         self.parent = parent
 
-    def create_variable(self, name: str, vartype: str, is_func: bool = False):
+    def create_variable(self, name: str, vartype: str, is_func: bool = False, is_struct: bool = False):
         if name in self.table:
             raise Exception(f"[Semantic] Variable '{name}' already declared in this scope")
         self.offset += 4
-        self.table[name] = Variable(vartype, None, self.offset, is_func)
+        self.table[name] = Variable(vartype, None, self.offset, is_func, is_struct)
 
     def get_value(self, name: str):
         if name in self.table:
@@ -56,7 +45,7 @@ class SymbolTable:
     def set_value(self, name: str, value, vartype: str = None):
         if name in self.table:
             var = self.table[name]
-            if not var.is_func and vartype is not None and var.vartype != vartype:
+            if not var.is_func and not var.is_struct and vartype is not None and var.vartype != vartype:
                 raise Exception(
                     f"[Semantic] Type mismatch for '{name}': expected {var.vartype}, got {vartype}"
                 )
@@ -67,62 +56,6 @@ class SymbolTable:
             return
         raise Exception(f"[Semantic] Variable '{name}' not defined")
 
-
-# ─────────────────────────────────────────────
-#  CODE
-# ─────────────────────────────────────────────
-
-class Code:
-    instructions = []
-
-    def append(code: str) -> None:
-        Code.instructions.append(code)
-
-    def dump(filename: str) -> None:
-        header = (
-            'section .data\n'
-            '  format_out: db "%d", 10, 0 ; format do printf\n'
-            '  format_in: db "%d", 0 ; format do scanf\n'
-            '  scan_int: dd 0; 32-bits integer\n'
-            '\n'
-            'section .text\n'
-            '\n'
-            '  extern printf ; usar _printf para Windows\n'
-            '  extern scanf ; usar _scanf para Windows\n'
-            '  ; extern _ExitProcess@4 ; usar para Windows\n'
-            '  global _start ; inicio do programa\n'
-            '\n'
-            '_start:\n'
-            '  push ebp ; guarda o EBP\n'
-            '  mov ebp, esp ; zera a pilha\n'
-            '\n'
-            '  ; aqui comeca o codigo gerado:\n'
-            '\n'
-        )
-        footer = (
-            '\n'
-            '  ; aqui termina o codigo gerado\n'
-            '\n'
-            '  mov esp, ebp ; reestabelece a pilha\n'
-            '  pop ebp\n'
-            '\n'
-            '  ; chamada da interrupcao de saida (Linux)\n'
-            '  mov eax, 1\n'
-            '  xor ebx, ebx\n'
-            '  int 0x80\n'
-            '  ; Para Windows:\n'
-            '  ; push dword 0\n'
-            '  ; call _ExitProcess@4\n'
-        )
-        with open(filename, 'w') as f:
-            f.write(header)
-            f.write("\n".join(Code.instructions))
-            f.write(footer)
-
-
-# ─────────────────────────────────────────────
-#  LEXER
-# ─────────────────────────────────────────────
 
 class Lexer:
     def __init__(self, source: str):
@@ -150,6 +83,7 @@ class Lexer:
         "boolean":  "TYPE",
         "function": "FUNC",
         "return":   "RETURN",
+        "struct":   "STRUCT",
     }
 
     def select_next(self):
@@ -204,7 +138,8 @@ class Lexer:
                 self.next = Token("CONCAT", "..")
                 self.position += 2
             else:
-                raise Exception(f"[Lexer] Invalid symbol '.' at position {self.position}")
+                self.next = Token("DOT", ".")
+                self.position += 1
         elif char == '"':
             self.position += 1
             s = ""
@@ -237,10 +172,6 @@ class Lexer:
             raise Exception(f"[Lexer] Invalid symbol '{char}' at position {self.position}")
 
 
-# ─────────────────────────────────────────────
-#  AST NODES
-# ─────────────────────────────────────────────
-
 class Node:
     id = 0
 
@@ -254,10 +185,10 @@ class Node:
         self.children = children if children is not None else []
         self.uid      = Node.new_id()
 
-    def evaluate(self, st: SymbolTable):
+    def evaluate(self, st):
         raise NotImplementedError("[Semantic] evaluate() not implemented")
 
-    def generate(self, st: SymbolTable):
+    def generate(self, st):
         raise NotImplementedError("[CodeGen] generate() not implemented")
 
 
@@ -269,7 +200,7 @@ class IntVal(Node):
         return Variable("number", self.value)
 
     def generate(self, st):
-        Code.append(f"  mov eax, {self.value}")
+        pass
 
 
 class BoolVal(Node):
@@ -280,7 +211,7 @@ class BoolVal(Node):
         return Variable("boolean", self.value)
 
     def generate(self, st):
-        Code.append(f"  mov eax, {1 if self.value else 0}")
+        pass
 
 
 class StringVal(Node):
@@ -302,8 +233,7 @@ class Identifier(Node):
         return st.get_value(self.value)
 
     def generate(self, st):
-        var = st.get_value(self.value)
-        Code.append(f"  mov eax, [ebp-{var.shift}] ; {self.value}")
+        pass
 
 
 class UnOp(Node):
@@ -327,14 +257,7 @@ class UnOp(Node):
         raise Exception(f"[Semantic] Unknown unary operator '{self.value}'")
 
     def generate(self, st):
-        self.children[0].generate(st)
-        if self.value == "-":
-            Code.append("  neg eax")
-        elif self.value == "not":
-            Code.append("  cmp eax, 0")
-            Code.append("  mov eax, 0")
-            Code.append("  mov ecx, 1")
-            Code.append("  cmove eax, ecx ; not")
+        pass
 
 
 class BinOp(Node):
@@ -345,7 +268,6 @@ class BinOp(Node):
         left  = self.children[0].evaluate(st)
         right = self.children[1].evaluate(st)
         op    = self.value
-
         if op == "or":
             if left.vartype != "boolean" or right.vartype != "boolean":
                 raise Exception("[Semantic] 'or' requires booleans")
@@ -358,8 +280,8 @@ class BinOp(Node):
             if left.vartype != right.vartype:
                 raise Exception(f"[Semantic] Type mismatch in '{op}'")
             if op == "==": res = left.value == right.value
-            elif op == "<": res = left.value <  right.value
-            else:           res = left.value >  right.value
+            elif op == "<": res = left.value < right.value
+            else:           res = left.value > right.value
             return Variable("boolean", res)
         if op == "..":
             def _tostr(v):
@@ -382,66 +304,7 @@ class BinOp(Node):
         raise Exception(f"[Semantic] Unknown binary operator '{op}'")
 
     def generate(self, st):
-        op = self.value
-
-        if op == "or":
-            self.children[0].generate(st)
-            Code.append("  push eax")
-            self.children[1].generate(st)
-            Code.append("  pop ecx")
-            Code.append("  or eax, ecx ; or")
-            Code.append("  cmp eax, 0")
-            Code.append("  mov eax, 0")
-            Code.append("  mov ecx, 1")
-            Code.append("  cmovne eax, ecx")
-            return
-        if op == "and":
-            self.children[0].generate(st)
-            Code.append("  push eax")
-            self.children[1].generate(st)
-            Code.append("  pop ecx")
-            Code.append("  and eax, ecx ; and")
-            Code.append("  cmp eax, 0")
-            Code.append("  mov eax, 0")
-            Code.append("  mov ecx, 1")
-            Code.append("  cmovne eax, ecx")
-            return
-
-        self.children[1].generate(st)
-        Code.append("  push eax")
-        self.children[0].generate(st)
-
-        if op == "+":
-            Code.append("  pop ecx")
-            Code.append("  add eax, ecx")
-        elif op == "-":
-            Code.append("  pop ecx")
-            Code.append("  sub eax, ecx")
-        elif op == "*":
-            Code.append("  pop ecx")
-            Code.append("  imul ecx")
-        elif op == "/":
-            Code.append("  pop ecx")
-            Code.append("  cdq")
-            Code.append("  idiv ecx")
-        elif op == "==":
-            Code.append("  pop ecx")
-            Code.append("  cmp eax, ecx")
-            Code.append("  mov eax, 0")
-            Code.append("  mov ecx, 1")
-            Code.append("  cmove eax, ecx ; ==")
-        elif op == "<":
-            Code.append("  pop ecx")
-            Code.append("  cmp eax, ecx")
-            Code.append("  mov eax, 0")
-            Code.append("  mov ecx, 1")
-            Code.append("  cmovl eax, ecx ; <")
-        elif op == ">":
-            Code.append("  pop ecx")
-            Code.append("  cmp eax, ecx")
-            Code.append("  mov eax, 0")
-            Code.append("  mov ecx, 1")
-            Code.append("  cmovg eax, ecx ; >")
+        pass
 
 
 class VarDec(Node):
@@ -450,23 +313,36 @@ class VarDec(Node):
 
     def evaluate(self, st):
         name = self.children[0].value
-        st.create_variable(name, self.value, is_func=False)
+        vartype = self.value
+
+        # verifica se o tipo é uma struct declarada
+        try:
+            type_var = st.get_value(vartype)
+            if type_var.is_struct:
+                # instancia a struct: copia os campos do molde
+                struct_dec = type_var.value
+                fields = {}
+                for field in struct_dec.children:
+                    field_name = field.children[0].value
+                    field_type = field.value
+                    fields[field_name] = Variable(field_type, None)
+                st.create_variable(name, vartype, is_func=False, is_struct=False)
+                st.set_value(name, fields)
+                return
+        except Exception:
+            pass  # tipo não é struct, continua normal
+
+        st.create_variable(name, vartype, is_func=False)
         if len(self.children) > 1:
             result = self.children[1].evaluate(st)
-            if result.vartype != self.value:
+            if result.vartype != vartype:
                 raise Exception(
-                    f"[Semantic] Type mismatch: cannot assign {result.vartype} to {self.value} variable '{name}'"
+                    f"[Semantic] Type mismatch: cannot assign {result.vartype} to {vartype} variable '{name}'"
                 )
             st.set_value(name, result.value, result.vartype)
 
     def generate(self, st):
-        name = self.children[0].value
-        st.create_variable(name, self.value, is_func=False)
-        var = st.table[name]
-        Code.append(f"  sub esp, 4 ; var {name} {self.value} [EBP-{var.shift}]")
-        if len(self.children) > 1:
-            self.children[1].generate(st)
-            Code.append(f"  mov [ebp-{var.shift}], eax ; {name} = init")
+        pass
 
 
 class Assignment(Node):
@@ -478,9 +354,77 @@ class Assignment(Node):
         st.set_value(self.children[0].value, result.value, result.vartype)
 
     def generate(self, st):
-        self.children[1].generate(st)
-        var = st.get_value(self.children[0].value)
-        Code.append(f"  mov [ebp-{var.shift}], eax ; {self.children[0].value} = ...")
+        pass
+
+
+class StructAccess(Node):
+    """
+    value      = field name
+    children[0] = Identifier (instance name)
+    """
+    def __init__(self, value, children):
+        super().__init__(value, children)
+
+    def evaluate(self, st):
+        instance_name = self.children[0].value
+        field_name    = self.value
+        var = st.get_value(instance_name)
+        if not isinstance(var.value, dict):
+            raise Exception(f"[Semantic] '{instance_name}' is not a struct instance")
+        if field_name not in var.value:
+            raise Exception(f"[Semantic] Struct '{instance_name}' has no field '{field_name}'")
+        field = var.value[field_name]
+        return Variable(field.vartype, field.value)
+
+    def generate(self, st):
+        pass
+
+
+class StructFieldAssignment(Node):
+    """
+    value        = field name
+    children[0]  = Identifier (instance name)
+    children[1]  = expression
+    """
+    def __init__(self, value, children):
+        super().__init__(value, children)
+
+    def evaluate(self, st):
+        instance_name = self.children[0].value
+        field_name    = self.value
+        result        = self.children[1].evaluate(st)
+        var = st.get_value(instance_name)
+        if not isinstance(var.value, dict):
+            raise Exception(f"[Semantic] '{instance_name}' is not a struct instance")
+        if field_name not in var.value:
+            raise Exception(f"[Semantic] Struct '{instance_name}' has no field '{field_name}'")
+        field = var.value[field_name]
+        if field.vartype != result.vartype:
+            raise Exception(
+                f"[Semantic] Type mismatch for field '{field_name}': "
+                f"expected {field.vartype}, got {result.vartype}"
+            )
+        field.value = result.value
+
+    def generate(self, st):
+        pass
+
+
+class StructDec(Node):
+    """
+    value      = struct name
+    children   = list of VarDec (fields)
+    """
+    def __init__(self, value, children):
+        super().__init__(value, children)
+
+    def evaluate(self, st):
+        struct_name = self.value
+        st.create_variable(struct_name, struct_name, is_func=False, is_struct=True)
+        st.set_value(struct_name, self)
+
+    def generate(self, st):
+        pass
 
 
 class Print(Node):
@@ -491,17 +435,41 @@ class Print(Node):
         result = self.children[0].evaluate(st)
         if result.vartype == "boolean":
             print("true" if result.value else "false")
-        elif result.vartype == "string":
-            print(result.value)
         else:
             print(result.value)
 
     def generate(self, st):
-        self.children[0].generate(st)
-        Code.append("  push eax ; arg printf")
-        Code.append("  push format_out")
-        Code.append("  call printf")
-        Code.append("  add esp, 8 ; limpa args")
+        pass
+
+
+class Block(Node):
+    def __init__(self, value, children):
+        super().__init__(value, children)
+
+    def evaluate(self, st):
+        for child in self.children:
+            if isinstance(child, Block):
+                inner_st = SymbolTable(parent=st)
+                result = child.evaluate(inner_st)
+            else:
+                result = child.evaluate(st)
+            if result is not None:
+                return result
+        return None
+
+    def generate(self, st):
+        pass
+
+
+class NoOp(Node):
+    def __init__(self, value, children):
+        super().__init__(value, children)
+
+    def evaluate(self, st):
+        return None
+
+    def generate(self, st):
+        pass
 
 
 class Read(Node):
@@ -512,11 +480,7 @@ class Read(Node):
         return Variable("number", int(input()))
 
     def generate(self, st):
-        Code.append("  push scan_int ; endereco de suporte")
-        Code.append("  push format_in ; formato de entrada (int)")
-        Code.append("  call scanf")
-        Code.append("  add esp, 8 ; Remove os argumentos da pilha")
-        Code.append("  mov eax, dword [scan_int] ; retorna o valor lido em EAX")
+        pass
 
 
 class If(Node):
@@ -538,19 +502,7 @@ class If(Node):
         return None
 
     def generate(self, st):
-        uid = self.uid
-        self.children[0].generate(st)
-        Code.append(f"  cmp eax, 0")
-        if len(self.children) > 2:
-            Code.append(f"  je else_{uid}")
-        else:
-            Code.append(f"  je exit_{uid}")
-        self.children[1].generate(st)
-        if len(self.children) > 2:
-            Code.append(f"  jmp exit_{uid}")
-            Code.append(f"  else_{uid}:")
-            self.children[2].generate(st)
-        Code.append(f"  exit_{uid}:")
+        pass
 
 
 class While(Node):
@@ -570,44 +522,6 @@ class While(Node):
         return None
 
     def generate(self, st):
-        uid = self.uid
-        Code.append(f"  loop_{uid}: ; label do loop")
-        self.children[0].generate(st)
-        Code.append(f"  cmp eax, 0 ; se a condicao for falsa, sai")
-        Code.append(f"  je exit_{uid}")
-        self.children[1].generate(st)
-        Code.append(f"  jmp loop_{uid}")
-        Code.append(f"  exit_{uid}:")
-
-
-class Block(Node):
-    def __init__(self, value, children):
-        super().__init__(value, children)
-
-    def evaluate(self, st):
-        for child in self.children:
-            if isinstance(child, Block):
-                inner_st = SymbolTable(parent=st)
-                result = child.evaluate(inner_st)
-            else:
-                result = child.evaluate(st)
-            if result is not None:
-                return result
-        return None
-
-    def generate(self, st):
-        for child in self.children:
-            child.generate(st)
-
-
-class NoOp(Node):
-    def __init__(self, value, children):
-        super().__init__(value, children)
-
-    def evaluate(self, st):
-        return None
-
-    def generate(self, st):
         pass
 
 
@@ -619,16 +533,10 @@ class Return(Node):
         return self.children[0].evaluate(st)
 
     def generate(self, st):
-        raise NotImplementedError("[CodeGen] Return.generate() not implemented")
+        pass
 
 
 class FuncDec(Node):
-    """
-    value      = return type (str or None for void)
-    children[0]    = Identifier (name)
-    children[1..n] = VarDec (parameters)
-    children[-1]   = Block (body)
-    """
     def __init__(self, value, children):
         super().__init__(value, children)
 
@@ -639,45 +547,33 @@ class FuncDec(Node):
         st.set_value(func_name, self)
 
     def generate(self, st):
-        raise NotImplementedError("[CodeGen] FuncDec.generate() not implemented")
+        pass
 
 
 class FuncCall(Node):
-    """
-    value    = function name (str)
-    children = argument expressions
-    """
     def __init__(self, value, children):
         super().__init__(value, children)
 
     def evaluate(self, st):
         func_name = self.value
-
         try:
             var = st.get_value(func_name)
         except Exception:
             raise Exception(f"[Semantic] Function '{func_name}' not defined")
-
         if not var.is_func:
             raise Exception(f"[Semantic] '{func_name}' is not a function")
-
         func_dec = var.value
         if not isinstance(func_dec, FuncDec):
             raise Exception(f"[Semantic] '{func_name}' has no valid declaration")
-
         param_nodes  = func_dec.children[1:-1]
         arg_nodes    = self.children
-
         if len(arg_nodes) != len(param_nodes):
             raise Exception(
                 f"[Semantic] Function '{func_name}' expects {len(param_nodes)} argument(s), "
                 f"got {len(arg_nodes)}"
             )
-
         evaluated_args = [arg.evaluate(st) for arg in arg_nodes]
-
         func_st = SymbolTable(parent=st)
-
         for param, val in zip(param_nodes, evaluated_args):
             param_name = param.children[0].value
             param_type = param.value
@@ -688,10 +584,8 @@ class FuncCall(Node):
                 )
             func_st.create_variable(param_name, param_type or val.vartype)
             func_st.set_value(param_name, val.value)
-
         body   = func_dec.children[-1]
         result = body.evaluate(func_st)
-
         ret_type = func_dec.value
         if ret_type and ret_type != "void":
             if result is None:
@@ -704,12 +598,8 @@ class FuncCall(Node):
         return None
 
     def generate(self, st):
-        raise NotImplementedError("[CodeGen] FuncCall.generate() not implemented")
+        pass
 
-
-# ─────────────────────────────────────────────
-#  PARSER
-# ─────────────────────────────────────────────
 
 _parser_func_depth = 0
 
@@ -719,7 +609,6 @@ class Parser:
 
     def parse_factor() -> Node:
         tok = Parser.lexer.next
-
         if tok.type == "PLUS":
             Parser.lexer.select_next()
             return UnOp("+", [Parser.parse_factor()])
@@ -728,7 +617,7 @@ class Parser:
             return UnOp("-", [Parser.parse_factor()])
         elif tok.type == "NOT":
             Parser.lexer.select_next()
-            return UnOp("not", [Parser.parse_factor()])  # recursive: handles not not not x
+            return UnOp("not", [Parser.parse_factor()])
         elif tok.type == "OPEN_PAR":
             Parser.lexer.select_next()
             node = Parser.parse_bool_expression()
@@ -758,7 +647,7 @@ class Parser:
             name = tok.value
             Parser.lexer.select_next()
             if Parser.lexer.next.type == "OPEN_PAR":
-                Parser.lexer.select_next()  # consume '('
+                Parser.lexer.select_next()
                 args = []
                 if Parser.lexer.next.type != "CLOSE_PAR":
                     args.append(Parser.parse_bool_expression())
@@ -766,12 +655,19 @@ class Parser:
                         Parser.lexer.select_next()
                         args.append(Parser.parse_bool_expression())
                 if Parser.lexer.next.type != "CLOSE_PAR":
-                    raise Exception(f"[Parser] Expected ')' in function call, got {Parser.lexer.next.type}")
+                    raise Exception(f"[Parser] Expected ')' in function call")
                 Parser.lexer.select_next()
                 return FuncCall(name, args)
+            elif Parser.lexer.next.type == "DOT":
+                Parser.lexer.select_next()
+                if Parser.lexer.next.type != "IDEN":
+                    raise Exception(f"[Parser] Expected field name after '.'")
+                field_name = Parser.lexer.next.value
+                Parser.lexer.select_next()
+                return StructAccess(field_name, [Identifier(name, [])])
             return Identifier(name, [])
         else:
-            raise Exception(f"[Parser] Unexpected token '{tok.type}' ({tok.value!r}), expected factor")
+            raise Exception(f"[Parser] Unexpected token '{tok.type}', expected factor")
 
     def parse_term() -> Node:
         node = Parser.parse_factor()
@@ -791,12 +687,10 @@ class Parser:
 
     def parse_rel_expression() -> Node:
         node = Parser.parse_expression()
-        # Handle string concatenation (..) - right-associative
         if Parser.lexer.next.type == "CONCAT":
             Parser.lexer.select_next()
             right = Parser.parse_rel_expression()
-            node = BinOp("..", [node, right])
-            return node
+            return BinOp("..", [node, right])
         if Parser.lexer.next.type in ("EQ", "LT", "GT"):
             op = Parser.lexer.next.value
             Parser.lexer.select_next()
@@ -819,12 +713,14 @@ class Parser:
 
     def parse_block() -> Node:
         children = []
-        while Parser.lexer.next.type == "END": Parser.lexer.select_next()
+        while Parser.lexer.next.type == "END":
+            Parser.lexer.select_next()
         while Parser.lexer.next.type not in ("CLOSE_BRA", "ELSE", "EOF"):
             stmt = Parser.parse_statement()
             if stmt:
                 children.append(stmt)
-            while Parser.lexer.next.type == "END": Parser.lexer.select_next()
+            while Parser.lexer.next.type == "END":
+                Parser.lexer.select_next()
         return Block(None, children)
 
     def parse_var_declaration() -> Node:
@@ -833,7 +729,8 @@ class Parser:
             raise Exception("[Parser] Expected identifier after 'local'")
         name = Parser.lexer.next.value
         Parser.lexer.select_next()
-        if Parser.lexer.next.type != "TYPE":
+        # tipo pode ser TYPE ou IDEN (nome de struct)
+        if Parser.lexer.next.type not in ("TYPE", "IDEN"):
             raise Exception("[Parser] Expected type after identifier in declaration")
         vartype = Parser.lexer.next.value
         Parser.lexer.select_next()
@@ -846,21 +743,52 @@ class Parser:
             Parser.lexer.select_next()
         return node
 
+    def parse_struct_declaration() -> Node:
+        Parser.lexer.select_next()  # consume 'struct'
+        if Parser.lexer.next.type != "IDEN":
+            raise Exception("[Parser] Expected struct name after 'struct'")
+        struct_name = Parser.lexer.next.value
+        Parser.lexer.select_next()
+        while Parser.lexer.next.type == "END":
+            Parser.lexer.select_next()
+        fields = []
+        while Parser.lexer.next.type not in ("CLOSE_BRA", "EOF"):
+            if Parser.lexer.next.type == "VAR":
+                Parser.lexer.select_next()  # consume 'local'
+                if Parser.lexer.next.type != "IDEN":
+                    raise Exception("[Parser] Expected field name")
+                field_name = Parser.lexer.next.value
+                Parser.lexer.select_next()
+                if Parser.lexer.next.type not in ("TYPE", "IDEN"):
+                    raise Exception("[Parser] Expected field type")
+                field_type = Parser.lexer.next.value
+                Parser.lexer.select_next()
+                fields.append(VarDec(field_type, [Identifier(field_name, [])]))
+                if Parser.lexer.next.type == "END":
+                    Parser.lexer.select_next()
+            elif Parser.lexer.next.type == "END":
+                Parser.lexer.select_next()
+            else:
+                raise Exception(f"[Parser] Unexpected token in struct: {Parser.lexer.next.type}")
+        if Parser.lexer.next.type != "CLOSE_BRA":
+            raise Exception("[Parser] Expected 'end' to close struct")
+        Parser.lexer.select_next()
+        if Parser.lexer.next.type == "END":
+            Parser.lexer.select_next()
+        return StructDec(struct_name, fields)
+
     def parse_func_declaration() -> Node:
         global _parser_func_depth
         if _parser_func_depth > 0:
             raise Exception("[Parser] Cannot define a function inside another function")
-        Parser.lexer.select_next()  # consume 'function'
-
+        Parser.lexer.select_next()
         if Parser.lexer.next.type != "IDEN":
             raise Exception("[Parser] Expected function name after 'function'")
         func_name = Parser.lexer.next.value
         Parser.lexer.select_next()
-
         if Parser.lexer.next.type != "OPEN_PAR":
             raise Exception("[Parser] Expected '(' after function name")
         Parser.lexer.select_next()
-
         params = []
         if Parser.lexer.next.type == "IDEN":
             param_name = Parser.lexer.next.value
@@ -881,30 +809,23 @@ class Parser:
                 param_type = Parser.lexer.next.value
                 Parser.lexer.select_next()
                 params.append(VarDec(param_type, [Identifier(param_name, [])]))
-
         if Parser.lexer.next.type != "CLOSE_PAR":
             raise Exception("[Parser] Expected ')' after function parameters")
         Parser.lexer.select_next()
-
         ret_type = None
         if Parser.lexer.next.type == "TYPE":
             ret_type = Parser.lexer.next.value
             Parser.lexer.select_next()
-
         while Parser.lexer.next.type == "END":
             Parser.lexer.select_next()
-
         _parser_func_depth += 1
         body = Parser.parse_block()
         _parser_func_depth -= 1
-
         if Parser.lexer.next.type != "CLOSE_BRA":
-            raise Exception("[Parser] Expected 'end' to close function declaration")
+            raise Exception("[Parser] Expected 'end' to close function")
         Parser.lexer.select_next()
-
         if Parser.lexer.next.type == "END":
             Parser.lexer.select_next()
-
         children = [Identifier(func_name, [])] + params + [body]
         return FuncDec(ret_type, children)
 
@@ -996,14 +917,28 @@ class Parser:
         elif tok.type == "IDEN":
             name = tok.value
             Parser.lexer.select_next()
-            if Parser.lexer.next.type == "ASSIGN":
+            if Parser.lexer.next.type == "DOT":
+                # x.b = expr
+                Parser.lexer.select_next()
+                if Parser.lexer.next.type != "IDEN":
+                    raise Exception("[Parser] Expected field name after '.'")
+                field_name = Parser.lexer.next.value
+                Parser.lexer.select_next()
+                if Parser.lexer.next.type != "ASSIGN":
+                    raise Exception("[Parser] Expected '=' after field access")
+                Parser.lexer.select_next()
+                expr = Parser.parse_bool_expression()
+                if Parser.lexer.next.type == "END":
+                    Parser.lexer.select_next()
+                return StructFieldAssignment(field_name, [Identifier(name, []), expr])
+            elif Parser.lexer.next.type == "ASSIGN":
                 Parser.lexer.select_next()
                 expr = Parser.parse_bool_expression()
                 if Parser.lexer.next.type == "END":
                     Parser.lexer.select_next()
                 return Assignment(None, [Identifier(name, []), expr])
             elif Parser.lexer.next.type == "OPEN_PAR":
-                Parser.lexer.select_next()  # consume '('
+                Parser.lexer.select_next()
                 args = []
                 if Parser.lexer.next.type != "CLOSE_PAR":
                     args.append(Parser.parse_bool_expression())
@@ -1011,34 +946,38 @@ class Parser:
                         Parser.lexer.select_next()
                         args.append(Parser.parse_bool_expression())
                 if Parser.lexer.next.type != "CLOSE_PAR":
-                    raise Exception(f"[Parser] Expected ')' in function call, got {Parser.lexer.next.type}")
+                    raise Exception(f"[Parser] Expected ')' in function call")
                 Parser.lexer.select_next()
                 if Parser.lexer.next.type == "END":
                     Parser.lexer.select_next()
                 return FuncCall(name, args)
             else:
-                raise Exception(
-                    f"[Parser] Expected '=' or '(' after identifier '{name}', "
-                    f"got {Parser.lexer.next.type}"
-                )
+                raise Exception(f"[Parser] Expected '=', '(' or '.' after '{name}'")
 
         elif tok.type == "FUNC":
             return Parser.parse_func_declaration()
 
+        elif tok.type == "STRUCT":
+            return Parser.parse_struct_declaration()
+
         else:
-            raise Exception(f"[Parser] Unexpected token '{tok.type}' ({tok.value!r}) in statement")
+            raise Exception(f"[Parser] Unexpected token '{tok.type}' in statement")
 
     def parse_program() -> Node:
         children = []
-        while Parser.lexer.next.type == "END": Parser.lexer.select_next()
+        while Parser.lexer.next.type == "END":
+            Parser.lexer.select_next()
         while Parser.lexer.next.type != "EOF":
             if Parser.lexer.next.type == "FUNC":
                 node = Parser.parse_func_declaration()
+            elif Parser.lexer.next.type == "STRUCT":
+                node = Parser.parse_struct_declaration()
             else:
                 node = Parser.parse_statement()
             if node:
                 children.append(node)
-            while Parser.lexer.next.type == "END": Parser.lexer.select_next()
+            while Parser.lexer.next.type == "END":
+                Parser.lexer.select_next()
         return Block(None, children)
 
     def run(code: str) -> Node:
@@ -1049,10 +988,6 @@ class Parser:
             raise Exception(f"[Parser] Unexpected token {Parser.lexer.next.type}, expected EOF")
         return node
 
-
-# ─────────────────────────────────────────────
-#  MAIN
-# ─────────────────────────────────────────────
 
 def main():
     if len(sys.argv) < 2:
