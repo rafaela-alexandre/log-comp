@@ -14,11 +14,9 @@ class Lexer:
         self.next = None
 
     def select_next(self):
-        # Pula espaços em branco
         while self.position < len(self.source) and self.source[self.position] == " ":
             self.position += 1
 
-        # Fim da entrada
         if self.position >= len(self.source):
             self.next = Token("EOF", "")
             return
@@ -33,6 +31,10 @@ class Lexer:
             self.next = Token("MINUS", "-")
             self.position += 1
 
+        elif char == "^":                          # NOVO
+            self.next = Token("XOR", "^")
+            self.position += 1
+
         elif char.isdigit():
             num = ""
             while self.position < len(self.source) and self.source[self.position].isdigit():
@@ -45,7 +47,7 @@ class Lexer:
 
 
 class Parser:
-    lexer = None  # atributo estático
+    lexer = None
 
     def parse_expression() -> int:
         if Parser.lexer.next.type != "INT":
@@ -54,7 +56,7 @@ class Parser:
         result = Parser.lexer.next.value
         Parser.lexer.select_next()
 
-        while Parser.lexer.next.type in ("PLUS", "MINUS"):
+        while Parser.lexer.next.type in ("PLUS", "MINUS", "XOR"):  # NOVO
             op = Parser.lexer.next.type
             Parser.lexer.select_next()
 
@@ -63,8 +65,10 @@ class Parser:
 
             if op == "PLUS":
                 result += Parser.lexer.next.value
-            else:
+            elif op == "MINUS":
                 result -= Parser.lexer.next.value
+            else:                                  # NOVO
+                result ^= Parser.lexer.next.value
 
             Parser.lexer.select_next()
 
