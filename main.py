@@ -65,6 +65,7 @@ class Lexer:
         "number": "TYPE",
         "string": "TYPE",
         "boolean": "TYPE",
+        "float": "TYPE",
     }
 
     def select_next(self):
@@ -132,7 +133,15 @@ class Lexer:
             while self.position < len(self.source) and self.source[self.position].isdigit():
                 num += self.source[self.position]
                 self.position += 1
-            self.next = Token("INT", int(num))
+            if self.position < len(self.source) and self.source[self.position] == ".":
+                num += "."
+                self.position += 1
+                while self.position < len(self.source) and self.source[self.position].isdigit():
+                    num += self.source[self.position]
+                    self.position += 1
+                self.next = Token("FLOAT", float(num))
+            else:
+                self.next = Token("INT", int(num))
         elif char.isalpha() or char == "_":
             iden = ""
             while self.position < len(self.source) and (self.source[self.position].isalnum() or self.source[self.position] == "_"):
@@ -161,6 +170,11 @@ class IntVal(Node):
         return self.value, "number"
 
 
+class FloatVal(Node):
+    def evaluate(self, st):
+        return self.value, "float"
+
+
 class BoolVal(Node):
     def evaluate(self, st):
         return self.value, "boolean"
@@ -170,18 +184,43 @@ class StringVal(Node):
     def evaluate(self, st):
         return self.value, "string"
 
+class CastOp(Node):
+    def evaluate(self, st):
+        val, vartype = self.children[0].evaluate(st)
+        target = self.value
+        if target == "number":
+            if vartype == "number":
+                return val, "number"
+            elif vartype == "float":
+                return round(val), "number"  # round, não int
+            else:
+                raise Exception(f"[Semantic] Cannot cast {vartype} to number")
+        elif target == "float":
+            if vartype == "float":
+                return val, "float"          # mantém float
+            elif vartype == "number":
+                return float(val), "float"
+            else:
+                raise Exception(f"[Semantic] Cannot cast {vartype} to float")
+        elif target == "string":
+            return str(val), "string"
+        elif target == "boolean":
+            raise Exception(f"[Semantic] Cannot cast to boolean")
+        else:
+            raise Exception(f"[Semantic] Unknown cast target '{target}'")
+
 
 class UnOp(Node):
     def evaluate(self, st):
         val, vartype = self.children[0].evaluate(st)
         if self.value == "+":
-            if vartype != "number":
-                raise Exception("[Semantic] Unary '+' requires number")
-            return +val, "number"
+            if vartype not in ("number", "float"):
+                raise Exception("[Semantic] Unary '+' requires number or float")
+            return +val, vartype
         elif self.value == "-":
-            if vartype != "number":
-                raise Exception("[Semantic] Unary '-' requires number")
-            return -val, "number"
+            if vartype not in ("number", "float"):
+                raise Exception("[Semantic] Unary '-' requires number or float")
+            return -val, vartype
         elif self.value == "not":
             if vartype != "boolean":
                 raise Exception("[Semantic] 'not' requires boolean")
@@ -219,24 +258,25 @@ class BinOp(Node):
                 return left < right, "boolean"
             else:
                 return left > right, "boolean"
-        elif op == "+":
-            if ltype == "string" and rtype == "string":
-                return left + right, "string"
-            elif ltype == "number" and rtype == "number":
-                return left + right, "number"
-            else:
-                raise Exception(f"[Semantic] '+' cannot operate on {ltype} and {rtype}")
-        elif op in ("-", "*", "/"):
-            if ltype != "number" or rtype != "number":
-                raise Exception(f"[Semantic] '{op}' requires numbers")
-            if op == "-":
-                return left - right, "number"
+        elif op in ("+", "-", "*", "/"):
+            numeric = {"number", "float"}
+            if ltype not in numeric or rtype not in numeric:
+                if op == "+" and ltype == "string" and rtype == "string":
+                    return left + right, "string"
+                raise Exception(f"[Semantic] '{op}' cannot operate on {ltype} and {rtype}")
+            # float wins
+            result_type = "float" if "float" in (ltype, rtype) else "number"
+            if op == "+":
+                result = left + right
+            elif op == "-":
+                result = left - right
             elif op == "*":
-                return left * right, "number"
+                result = left * right
             else:
                 if right == 0:
                     raise Exception("[Semantic] Division by zero")
-                return left // right, "number"
+                result = left / right if result_type == "float" else left // right
+            return result, result_type
         else:
             raise Exception(f"[Semantic] Unknown binary operator '{op}'")
 
@@ -324,14 +364,29 @@ class Parser:
             Parser.lexer.select_next()
             return UnOp("not", [Parser.parse_factor()])
         elif Parser.lexer.next.type == "OPEN_PAR":
+            # lookahead: se o próximo for TYPE, é um cast
+            saved_pos = Parser.lexer.position
+            saved_next = Parser.lexer.next
             Parser.lexer.select_next()
-            node = Parser.parse_bool_expression()
-            if Parser.lexer.next.type != "CLOSE_PAR":
-                raise Exception(f"[Parser] Expected ')' but got {Parser.lexer.next.type}")
-            Parser.lexer.select_next()
-            return node
+            if Parser.lexer.next.type == "TYPE":
+                target_type = Parser.lexer.next.value
+                Parser.lexer.select_next()
+                if Parser.lexer.next.type != "CLOSE_PAR":
+                    raise Exception(f"[Parser] Expected ')' after cast type but got {Parser.lexer.next.type}")
+                Parser.lexer.select_next()
+                return CastOp(target_type, [Parser.parse_factor()])
+            else:
+                node = Parser.parse_bool_expression()
+                if Parser.lexer.next.type != "CLOSE_PAR":
+                    raise Exception(f"[Parser] Expected ')' but got {Parser.lexer.next.type}")
+                Parser.lexer.select_next()
+                return node
         elif Parser.lexer.next.type == "INT":
             node = IntVal(Parser.lexer.next.value, [])
+            Parser.lexer.select_next()
+            return node
+        elif Parser.lexer.next.type == "FLOAT":
+            node = FloatVal(Parser.lexer.next.value, [])
             Parser.lexer.select_next()
             return node
         elif Parser.lexer.next.type == "BOOL":
