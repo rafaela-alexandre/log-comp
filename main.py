@@ -111,6 +111,12 @@ class Lexer:
         elif char == ">":
             self.next = Token("GT", ">")
             self.position += 1
+        elif char == ".":
+            if self.position + 1 < len(self.source) and self.source[self.position + 1] == ".":
+                self.next = Token("CONCAT", "..")
+                self.position += 2
+            else:
+                raise Exception(f"[Lexer] Invalid symbol '.'")
         elif char == '"':
             self.position += 1
             s = ""
@@ -190,7 +196,13 @@ class BinOp(Node):
         right, rtype = self.children[1].evaluate(st)
         op = self.value
 
-        if op == "and":
+        if op == "..":
+            def to_str(v, t):
+                if t == "boolean":
+                    return "true" if v else "false"
+                return str(v)
+            return to_str(left, ltype) + to_str(right, rtype), "string"
+        elif op == "and":
             if ltype != "boolean" or rtype != "boolean":
                 raise Exception("[Semantic] 'and' requires booleans")
             return left and right, "boolean"
@@ -241,7 +253,6 @@ class Assignment(Node):
 
 
 class VarDec(Node):
-    # value = type string, children[0] = Identifier, children[1] = expr (optional)
     def evaluate(self, st):
         name = self.children[0].value
         st.create_variable(name, self.value)
@@ -365,6 +376,9 @@ class Parser:
 
     def parse_rel_expression() -> Node:
         node = Parser.parse_expression()
+        while Parser.lexer.next.type == "CONCAT":
+            Parser.lexer.select_next()
+            node = BinOp("..", [node, Parser.parse_expression()])
         if Parser.lexer.next.type in ("EQ", "LT", "GT"):
             op = Parser.lexer.next.value
             Parser.lexer.select_next()
