@@ -9,10 +9,13 @@ This repository is monitored by Compiler Tester for automatic compilation status
 ## EBNF
 ```ebnf
 PROGRAM = { STATEMENT } ;
-STATEMENT = ((IDENTIFIER, "=", EXPRESSION) | (PRINT, "(", EXPRESSION, ")") | ε), EOL ;
+STATEMENT = ((IDENTIFIER, "=", BOOLEXPRESSION) | (IF, "(", BOOLEXPRESSION, ")", STATEMENT, ("ELSE", STATEMENT) | ε) | (PRINT, "(", BOOLEXPRESSION, ")") | (WHILE, "(", BOOLEXPRESSION, ")", STATEMENT) | ε), EOL ;
+BOOLEXPRESSION = BOOLTERM, { "or", BOOLTERM } ;
+BOOLTERM = RELEXPRESSION, { "and", RELEXPRESSION } ;
+RELEXPRESSION = EXPRESSION, (("==" | ""), EXPRESSION | ε) ;
 EXPRESSION = TERM, { ("+" | "-"), TERM } ;
 TERM = FACTOR, { ("*" | "/"), FACTOR } ;
-FACTOR = ("+" | "-"), FACTOR | "(", EXPRESSION, ")" | NUMBER ;
+FACTOR = ("+"|"-"), FACTOR | "(", BOOLEXPRESSION, ")" | NUMBER | READ, "(", ")" ;
 NUMBER = DIGIT, {DIGIT} ;
 DIGIT = 0 | 1 | ... | 9 ;
 IDENTIFIER = LETTER, {LETTER | DIGIT | "_"} ;
