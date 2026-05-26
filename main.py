@@ -374,6 +374,16 @@ class Parser:
                 raise Exception(f"[Parser] Expected newline but got {Parser.lexer.next.type}")
             Parser.lexer.select_next()
             return Print(None, [expr])
+        
+        elif Parser.lexer.next.type == "OPEN_BRA":
+            Parser.lexer.select_next()
+            block = Parser.parse_block()
+            if Parser.lexer.next.type != "CLOSE_BRA":
+                raise Exception(f"[Parser] Expected 'end' to close 'do' but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type == "END":
+                Parser.lexer.select_next()
+            return block
 
         else:
             raise Exception(f"[Parser] Unexpected token {Parser.lexer.next.type} in statement")
