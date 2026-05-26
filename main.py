@@ -146,4 +146,261 @@ class BinOp(Node):
             return left + right
         elif self.value == "-":
             return left - right
-        elif self.v
+        elif self.value == "*":
+            return left * right
+        elif self.value == "/":
+            if right == 0:
+                raise Exception("[Semantic] Division by zero")
+            return left // right
+        elif self.value == "==":
+            return left == right
+        elif self.value == "<":
+            return left < right
+        elif self.value == ">":
+            return left > right
+        elif self.value == "and":
+            return left and right
+        elif self.value == "or":
+            return left or right
+        else:
+            raise Exception(f"[Semantic] Unknown binary operator '{self.value}'")
+
+
+class Identifier(Node):
+    def evaluate(self, st):
+        return st.get_value(self.value)
+
+
+class Assignment(Node):
+    def evaluate(self, st):
+        st.set_value(self.children[0].value, self.children[1].evaluate(st))
+
+
+class Print(Node):
+    def evaluate(self, st):
+        print(self.children[0].evaluate(st))
+
+
+class Block(Node):
+    def evaluate(self, st):
+        for child in self.children:
+            child.evaluate(st)
+
+
+class NoOp(Node):
+    def evaluate(self, st):
+        pass
+
+
+class Read(Node):
+    def evaluate(self, st):
+        return int(input())
+
+
+class If(Node):
+    def evaluate(self, st):
+        if self.children[0].evaluate(st):
+            self.children[1].evaluate(st)
+        elif len(self.children) > 2:
+            self.children[2].evaluate(st)
+
+
+class While(Node):
+    def evaluate(self, st):
+        while self.children[0].evaluate(st):
+            self.children[1].evaluate(st)
+
+
+class Parser:
+    lexer = None
+
+    def parse_factor() -> Node:
+        if Parser.lexer.next.type == "PLUS":
+            Parser.lexer.select_next()
+            return UnOp("+", [Parser.parse_factor()])
+        elif Parser.lexer.next.type == "MINUS":
+            Parser.lexer.select_next()
+            return UnOp("-", [Parser.parse_factor()])
+        elif Parser.lexer.next.type == "NOT":
+            Parser.lexer.select_next()
+            return UnOp("not", [Parser.parse_factor()])
+        elif Parser.lexer.next.type == "OPEN_PAR":
+            Parser.lexer.select_next()
+            node = Parser.parse_bool_expression()
+            if Parser.lexer.next.type != "CLOSE_PAR":
+                raise Exception(f"[Parser] Expected ')' but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            return node
+        elif Parser.lexer.next.type == "INT":
+            node = IntVal(Parser.lexer.next.value, [])
+            Parser.lexer.select_next()
+            return node
+        elif Parser.lexer.next.type == "IDEN":
+            node = Identifier(Parser.lexer.next.value, [])
+            Parser.lexer.select_next()
+            return node
+        elif Parser.lexer.next.type == "READ":
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type != "OPEN_PAR":
+                raise Exception(f"[Parser] Expected '(' after read but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type != "CLOSE_PAR":
+                raise Exception(f"[Parser] Expected ')' after read( but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            return Read(None, [])
+        else:
+            raise Exception(f"[Parser] Unexpected token {Parser.lexer.next.type}, expected factor")
+
+    def parse_term() -> Node:
+        node = Parser.parse_factor()
+        while Parser.lexer.next.type in ("MULT", "DIV"):
+            op = Parser.lexer.next.value
+            Parser.lexer.select_next()
+            node = BinOp(op, [node, Parser.parse_factor()])
+        return node
+
+    def parse_expression() -> Node:
+        node = Parser.parse_term()
+        while Parser.lexer.next.type in ("PLUS", "MINUS"):
+            op = Parser.lexer.next.value
+            Parser.lexer.select_next()
+            node = BinOp(op, [node, Parser.parse_term()])
+        return node
+
+    def parse_rel_expression() -> Node:
+        node = Parser.parse_expression()
+        if Parser.lexer.next.type in ("EQ", "LT", "GT"):
+            op = Parser.lexer.next.value
+            Parser.lexer.select_next()
+            node = BinOp(op, [node, Parser.parse_expression()])
+        return node
+
+    def parse_bool_term() -> Node:
+        node = Parser.parse_rel_expression()
+        while Parser.lexer.next.type == "AND":
+            Parser.lexer.select_next()
+            node = BinOp("and", [node, Parser.parse_rel_expression()])
+        return node
+
+    def parse_bool_expression() -> Node:
+        node = Parser.parse_bool_term()
+        while Parser.lexer.next.type == "OR":
+            Parser.lexer.select_next()
+            node = BinOp("or", [node, Parser.parse_bool_term()])
+        return node
+
+    def parse_block() -> Node:
+        children = []
+        while Parser.lexer.next.type == "END":
+            Parser.lexer.select_next()
+        while Parser.lexer.next.type not in ("CLOSE_BRA", "ELSE", "EOF"):
+            children.append(Parser.parse_statement())
+            while Parser.lexer.next.type == "END":
+                Parser.lexer.select_next()
+        return Block(None, children)
+
+    def parse_statement() -> Node:
+        if Parser.lexer.next.type == "END":
+            Parser.lexer.select_next()
+            return NoOp(None, [])
+
+        elif Parser.lexer.next.type == "IF":
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type != "OPEN_PAR":
+                raise Exception(f"[Parser] Expected '(' after 'if' but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            cond = Parser.parse_bool_expression()
+            if Parser.lexer.next.type != "CLOSE_PAR":
+                raise Exception(f"[Parser] Expected ')' after if condition but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type != "OPEN_IF_BRA":
+                raise Exception(f"[Parser] Expected 'then' but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            then_block = Parser.parse_block()
+            node = If(None, [cond, then_block])
+            if Parser.lexer.next.type == "ELSE":
+                Parser.lexer.select_next()
+                else_block = Parser.parse_block()
+                node.children.append(else_block)
+            if Parser.lexer.next.type != "CLOSE_BRA":
+                raise Exception(f"[Parser] Expected 'end' to close 'if' but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type == "END":
+                Parser.lexer.select_next()
+            return node
+
+        elif Parser.lexer.next.type == "WHILE":
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type != "OPEN_PAR":
+                raise Exception(f"[Parser] Expected '(' after 'while' but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            cond = Parser.parse_bool_expression()
+            if Parser.lexer.next.type != "CLOSE_PAR":
+                raise Exception(f"[Parser] Expected ')' after while condition but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type != "OPEN_BRA":
+                raise Exception(f"[Parser] Expected 'do' but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            block = Parser.parse_block()
+            if Parser.lexer.next.type != "CLOSE_BRA":
+                raise Exception(f"[Parser] Expected 'end' to close 'while' but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type == "END":
+                Parser.lexer.select_next()
+            return While(None, [cond, block])
+
+        elif Parser.lexer.next.type == "IDEN":
+            iden = Identifier(Parser.lexer.next.value, [])
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type != "ASSIGN":
+                raise Exception(f"[Parser] Expected '=' but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            expr = Parser.parse_bool_expression()
+            if Parser.lexer.next.type != "END":
+                raise Exception(f"[Parser] Expected newline but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            return Assignment(None, [iden, expr])
+
+        elif Parser.lexer.next.type == "PRINT":
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type != "OPEN_PAR":
+                raise Exception(f"[Parser] Expected '(' but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            expr = Parser.parse_bool_expression()
+            if Parser.lexer.next.type != "CLOSE_PAR":
+                raise Exception(f"[Parser] Expected ')' but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type != "END":
+                raise Exception(f"[Parser] Expected newline but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            return Print(None, [expr])
+
+        else:
+            raise Exception(f"[Parser] Unexpected token {Parser.lexer.next.type} in statement")
+
+    def parse_program() -> Node:
+        children = []
+        while Parser.lexer.next.type != "EOF":
+            children.append(Parser.parse_statement())
+        return Block(None, children)
+
+    def run(code: str) -> Node:
+        Parser.lexer = Lexer(code)
+        Parser.lexer.select_next()
+        node = Parser.parse_program()
+        if Parser.lexer.next.type != "EOF":
+            raise Exception(f"[Parser] Unexpected token {Parser.lexer.next.type}, expected EOF")
+        return node
+
+
+def main():
+    filename = sys.argv[1]
+    with open(filename, "r") as f:
+        code = f.read() + "\n"
+    code = PrePro.filter(code)
+    st = SymbolTable()
+    Parser.run(code).evaluate(st)
+
+
+if __name__ == "__main__":
+    main()
