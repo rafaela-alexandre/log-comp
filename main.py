@@ -10,12 +10,32 @@ class Token:
 
 class PrePro:
     def filter(code: str) -> str:
+        # Processa constantes: const NOME VALOR
+        lines = code.split("\n")
+        consts = {}
+        filtered_lines = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("const "):
+                parts = stripped.split()
+                if len(parts) != 3:
+                    raise Exception("[PrePro] Invalid const declaration")
+                _, name, value = parts
+                consts[name] = value
+            else:
+                filtered_lines.append(line)
+        code = "\n".join(filtered_lines)
+        # Substitui todas as ocorrências dos nomes das constantes pelo valor
+        for name, value in consts.items():
+            code = re.sub(rf'\b{name}\b', value, code)
+        # Remove comentários
         return re.sub(r'--[^\n]*', '', code)
 
 
 class Variable:
-    def __init__(self, value):
+    def __init__(self, value, immutable=False):
         self.value = value
+        self.immutable = immutable
 
 
 class SymbolTable:
@@ -27,8 +47,10 @@ class SymbolTable:
             raise Exception(f"[Semantic] Variable '{name}' not defined")
         return self.table[name].value
 
-    def set_value(self, name: str, value):
-        self.table[name] = Variable(value)
+    def set_value(self, name: str, value, immutable=False):
+        if name in self.table and self.table[name].immutable:
+            raise Exception(f"[Semantic] Cannot change the value of immutable variable '{name}'")
+        self.table[name] = Variable(value, immutable)
 
 
 class Lexer:
@@ -37,7 +59,7 @@ class Lexer:
         self.position = 0
         self.next = None
 
-    RESERVED = {"print"}
+    RESERVED = {"print", "imut"}
 
     def select_next(self):
         while self.position < len(self.source) and self.source[self.position] == " ":
@@ -152,11 +174,12 @@ class Identifier(Node):
 
 
 class Assignment(Node):
-    def __init__(self, value, children):
+    def __init__(self, value, children, immutable=False):
         super().__init__(value, children)
+        self.immutable = immutable
 
     def evaluate(self, st):
-        st.set_value(self.children[0].value, self.children[1].evaluate(st))
+        st.set_value(self.children[0].value, self.children[1].evaluate(st), self.immutable)
 
 
 class Print(Node):
@@ -185,17 +208,15 @@ class NoOp(Node):
 
 
 class Parser:
-    lexer = None  # atributo estático
+    lexer = None
 
     def parse_factor() -> Node:
         if Parser.lexer.next.type == "PLUS":
             Parser.lexer.select_next()
             return UnOp("+", [Parser.parse_factor()])
-
         elif Parser.lexer.next.type == "MINUS":
             Parser.lexer.select_next()
             return UnOp("-", [Parser.parse_factor()])
-
         elif Parser.lexer.next.type == "OPEN_PAR":
             Parser.lexer.select_next()
             node = Parser.parse_expression()
@@ -203,47 +224,53 @@ class Parser:
                 raise Exception(f"[Parser] Expected ')' but got {Parser.lexer.next.type}")
             Parser.lexer.select_next()
             return node
-
         elif Parser.lexer.next.type == "INT":
             node = IntVal(Parser.lexer.next.value, [])
             Parser.lexer.select_next()
             return node
-
         elif Parser.lexer.next.type == "IDEN":
             node = Identifier(Parser.lexer.next.value, [])
             Parser.lexer.select_next()
             return node
-
         else:
             raise Exception(f"[Parser] Unexpected token {Parser.lexer.next.type}, expected factor")
 
     def parse_term() -> Node:
         node = Parser.parse_factor()
-
         while Parser.lexer.next.type in ("MULT", "DIV"):
             op = Parser.lexer.next.value
             Parser.lexer.select_next()
             node = BinOp(op, [node, Parser.parse_factor()])
-
         return node
 
     def parse_expression() -> Node:
         node = Parser.parse_term()
-
         while Parser.lexer.next.type in ("PLUS", "MINUS"):
             op = Parser.lexer.next.value
             Parser.lexer.select_next()
             node = BinOp(op, [node, Parser.parse_term()])
-
         return node
 
     def parse_statement() -> Node:
-        # linha vazia
         if Parser.lexer.next.type == "END":
             Parser.lexer.select_next()
             return NoOp(None, [])
 
-        # atribuição: IDEN = EXPRESSION
+        elif Parser.lexer.next.type == "IMUT":
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type != "IDEN":
+                raise Exception(f"[Parser] Expected identifier after 'imut' but got {Parser.lexer.next.type}")
+            iden = Identifier(Parser.lexer.next.value, [])
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type != "ASSIGN":
+                raise Exception(f"[Parser] Expected '=' after imut identifier but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            expr = Parser.parse_expression()
+            if Parser.lexer.next.type != "END":
+                raise Exception(f"[Parser] Expected newline but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            return Assignment(None, [iden, expr], immutable=True)
+
         elif Parser.lexer.next.type == "IDEN":
             iden = Identifier(Parser.lexer.next.value, [])
             Parser.lexer.select_next()
@@ -256,7 +283,6 @@ class Parser:
             Parser.lexer.select_next()
             return Assignment(None, [iden, expr])
 
-        # print(EXPRESSION)
         elif Parser.lexer.next.type == "PRINT":
             Parser.lexer.select_next()
             if Parser.lexer.next.type != "OPEN_PAR":
@@ -283,12 +309,9 @@ class Parser:
     def run(code: str) -> Node:
         Parser.lexer = Lexer(code)
         Parser.lexer.select_next()
-
         node = Parser.parse_program()
-
         if Parser.lexer.next.type != "EOF":
             raise Exception(f"[Parser] Unexpected token {Parser.lexer.next.type}, expected EOF")
-
         return node
 
 
@@ -296,7 +319,6 @@ def main():
     filename = sys.argv[1]
     with open(filename, "r") as f:
         code = f.read() + "\n"
-
     code = PrePro.filter(code)
     st = SymbolTable()
     Parser.run(code).evaluate(st)
