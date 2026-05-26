@@ -30,8 +30,12 @@ class Lexer:
             self.next = Token("MINUS", "-")
             self.position += 1
         elif char == "*":
-            self.next = Token("MULT", "*")
-            self.position += 1
+            if self.position + 1 < len(self.source) and self.source[self.position + 1] == "*":
+                self.next = Token("POWER", "**")
+                self.position += 2
+            else:
+                self.next = Token("MULT", "*")
+                self.position += 1
         elif char == "/":
             self.next = Token("DIV", "/")
             self.position += 1
@@ -52,32 +56,36 @@ class Lexer:
 
 
 class Parser:
-    lexer = None  # atributo estático
+    lexer = None
 
-    def parse_factor() -> int:
-        if Parser.lexer.next.type == "PLUS":
-            Parser.lexer.select_next()
-            return +Parser.parse_factor()
-
-        elif Parser.lexer.next.type == "MINUS":
-            Parser.lexer.select_next()
-            return -Parser.parse_factor()
-
-        elif Parser.lexer.next.type == "OPEN_PAR":
+    def parse_power() -> int:
+        if Parser.lexer.next.type == "OPEN_PAR":
             Parser.lexer.select_next()
             result = Parser.parse_expression()
             if Parser.lexer.next.type != "CLOSE_PAR":
                 raise Exception(f"[Parser] Expected ')' but got {Parser.lexer.next.type}")
             Parser.lexer.select_next()
-            return result
-
         elif Parser.lexer.next.type == "INT":
             result = Parser.lexer.next.value
             Parser.lexer.select_next()
-            return result
-
         else:
-            raise Exception(f"[Parser] Unexpected token {Parser.lexer.next.type}, expected factor")
+            raise Exception(f"[Parser] Unexpected token {Parser.lexer.next.type}, expected number or '('")
+
+        if Parser.lexer.next.type == "POWER":
+            Parser.lexer.select_next()
+            result = result ** Parser.parse_factor()
+
+        return result
+
+    def parse_factor() -> int:
+        if Parser.lexer.next.type == "PLUS":
+            Parser.lexer.select_next()
+            return +Parser.parse_factor()
+        elif Parser.lexer.next.type == "MINUS":
+            Parser.lexer.select_next()
+            return -Parser.parse_factor()
+        else:
+            return Parser.parse_power()
 
     def parse_term() -> int:
         result = Parser.parse_factor()
