@@ -225,14 +225,15 @@ class While(Node):
 
 
 class For(Node):
-    # value = loop variable name
-    # children: [start_expr, end_expr, block]
     def evaluate(self, st):
         start = self.children[0].evaluate(st)
         end = self.children[1].evaluate(st)
-        for i in range(start, end + 1):
+        i = start
+        while i <= end:
             st.set_value(self.value, i)
             self.children[2].evaluate(st)
+            i += 1
+        st.set_value(self.value, i)
 
 
 class Parser:
