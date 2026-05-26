@@ -192,12 +192,12 @@ class CastOp(Node):
             if vartype == "number":
                 return val, "number"
             elif vartype == "float":
-                return round(val), "number"  # round, não int
+                return round(val), "number"
             else:
                 raise Exception(f"[Semantic] Cannot cast {vartype} to number")
         elif target == "float":
             if vartype == "float":
-                return val, "float"          # mantém float
+                return val, "float"
             elif vartype == "number":
                 return float(val), "float"
             else:
@@ -205,7 +205,12 @@ class CastOp(Node):
         elif target == "string":
             return str(val), "string"
         elif target == "boolean":
-            raise Exception(f"[Semantic] Cannot cast to boolean")
+            if vartype in ("number", "float"):
+                return val != 0, "boolean"
+            elif vartype == "boolean":
+                return val, "boolean"
+            else:
+                raise Exception(f"[Semantic] Cannot cast {vartype} to boolean")
         else:
             raise Exception(f"[Semantic] Unknown cast target '{target}'")
 
