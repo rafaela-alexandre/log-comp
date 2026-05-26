@@ -49,6 +49,7 @@ class Lexer:
         "then": "OPEN_IF_BRA",
         "do": "OPEN_BRA",
         "end": "CLOSE_BRA",
+        "for": "FOR",
     }
 
     def select_next(self):
@@ -81,6 +82,9 @@ class Lexer:
             self.position += 1
         elif char == ")":
             self.next = Token("CLOSE_PAR", ")")
+            self.position += 1
+        elif char == ",":
+            self.next = Token("COMMA", ",")
             self.position += 1
         elif char == "=":
             if self.position + 1 < len(self.source) and self.source[self.position + 1] == "=":
@@ -205,10 +209,30 @@ class If(Node):
             self.children[2].evaluate(st)
 
 
+class IfExpr(Node):
+    # children: [cond, then_expr, else_expr]
+    def evaluate(self, st):
+        if self.children[0].evaluate(st):
+            return self.children[1].evaluate(st)
+        else:
+            return self.children[2].evaluate(st)
+
+
 class While(Node):
     def evaluate(self, st):
         while self.children[0].evaluate(st):
             self.children[1].evaluate(st)
+
+
+class For(Node):
+    # value = loop variable name
+    # children: [start_expr, end_expr, block]
+    def evaluate(self, st):
+        start = self.children[0].evaluate(st)
+        end = self.children[1].evaluate(st)
+        for i in range(start, end + 1):
+            st.set_value(self.value, i)
+            self.children[2].evaluate(st)
 
 
 class Parser:
@@ -224,6 +248,22 @@ class Parser:
         elif Parser.lexer.next.type == "NOT":
             Parser.lexer.select_next()
             return UnOp("not", [Parser.parse_factor()])
+        elif Parser.lexer.next.type == "IF":
+            # if expression: if BOOLEXPR then BOOLEXPR else BOOLEXPR end
+            Parser.lexer.select_next()
+            cond = Parser.parse_bool_expression()
+            if Parser.lexer.next.type != "OPEN_IF_BRA":
+                raise Exception(f"[Parser] Expected 'then' in if expression but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            then_expr = Parser.parse_bool_expression()
+            if Parser.lexer.next.type != "ELSE":
+                raise Exception(f"[Parser] Expected 'else' in if expression but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            else_expr = Parser.parse_bool_expression()
+            if Parser.lexer.next.type != "CLOSE_BRA":
+                raise Exception(f"[Parser] Expected 'end' to close if expression but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            return IfExpr(None, [cond, then_expr, else_expr])
         elif Parser.lexer.next.type == "OPEN_PAR":
             Parser.lexer.select_next()
             node = Parser.parse_bool_expression()
@@ -349,6 +389,31 @@ class Parser:
                 Parser.lexer.select_next()
             return While(None, [cond, block])
 
+        elif Parser.lexer.next.type == "FOR":
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type != "IDEN":
+                raise Exception(f"[Parser] Expected identifier after 'for' but got {Parser.lexer.next.type}")
+            var_name = Parser.lexer.next.value
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type != "ASSIGN":
+                raise Exception(f"[Parser] Expected '=' after for variable but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            start = Parser.parse_expression()
+            if Parser.lexer.next.type != "COMMA":
+                raise Exception(f"[Parser] Expected ',' after for start but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            end = Parser.parse_expression()
+            if Parser.lexer.next.type != "OPEN_BRA":
+                raise Exception(f"[Parser] Expected 'do' after for range but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            block = Parser.parse_block()
+            if Parser.lexer.next.type != "CLOSE_BRA":
+                raise Exception(f"[Parser] Expected 'end' to close 'for' but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type == "END":
+                Parser.lexer.select_next()
+            return For(var_name, [start, end, block])
+
         elif Parser.lexer.next.type == "IDEN":
             iden = Identifier(Parser.lexer.next.value, [])
             Parser.lexer.select_next()
@@ -374,7 +439,7 @@ class Parser:
                 raise Exception(f"[Parser] Expected newline but got {Parser.lexer.next.type}")
             Parser.lexer.select_next()
             return Print(None, [expr])
-        
+
         elif Parser.lexer.next.type == "OPEN_BRA":
             Parser.lexer.select_next()
             block = Parser.parse_block()
