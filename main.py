@@ -1,4 +1,5 @@
 import sys
+import math
 
 
 class Token:
@@ -41,6 +42,9 @@ class Lexer:
         elif char == ")":
             self.next = Token("CLOSE_PAR", ")")
             self.position += 1
+        elif char == "!":
+            self.next = Token("FACT", "!")
+            self.position += 1
         elif char.isdigit():
             num = ""
             while self.position < len(self.source) and self.source[self.position].isdigit():
@@ -77,6 +81,11 @@ class UnOp(Node):
             return +self.children[0].evaluate()
         elif self.value == "-":
             return -self.children[0].evaluate()
+        elif self.value == "!":
+            val = self.children[0].evaluate()
+            if val < 0:
+                raise Exception("[Semantic] Factorial of negative number is not allowed")
+            return math.factorial(val)
         else:
             raise Exception(f"[Semantic] Unknown unary operator '{self.value}'")
 
@@ -103,32 +112,36 @@ class BinOp(Node):
 
 
 class Parser:
-    lexer = None  # atributo estático
+    lexer = None
 
-    def parse_factor() -> Node:
-        if Parser.lexer.next.type == "PLUS":
-            Parser.lexer.select_next()
-            return UnOp("+", [Parser.parse_factor()])
-
-        elif Parser.lexer.next.type == "MINUS":
-            Parser.lexer.select_next()
-            return UnOp("-", [Parser.parse_factor()])
-
-        elif Parser.lexer.next.type == "OPEN_PAR":
+    def parse_power() -> Node:
+        if Parser.lexer.next.type == "OPEN_PAR":
             Parser.lexer.select_next()
             node = Parser.parse_expression()
             if Parser.lexer.next.type != "CLOSE_PAR":
                 raise Exception(f"[Parser] Expected ')' but got {Parser.lexer.next.type}")
             Parser.lexer.select_next()
-            return node
-
         elif Parser.lexer.next.type == "INT":
             node = IntVal(Parser.lexer.next.value, [])
             Parser.lexer.select_next()
-            return node
-
         else:
-            raise Exception(f"[Parser] Unexpected token {Parser.lexer.next.type}, expected factor")
+            raise Exception(f"[Parser] Unexpected token {Parser.lexer.next.type}, expected number or '('")
+
+        if Parser.lexer.next.type == "FACT":
+            Parser.lexer.select_next()
+            node = UnOp("!", [node])
+
+        return node
+
+    def parse_factor() -> Node:
+        if Parser.lexer.next.type == "PLUS":
+            Parser.lexer.select_next()
+            return UnOp("+", [Parser.parse_factor()])
+        elif Parser.lexer.next.type == "MINUS":
+            Parser.lexer.select_next()
+            return UnOp("-", [Parser.parse_factor()])
+        else:
+            return Parser.parse_power()
 
     def parse_term() -> Node:
         node = Parser.parse_factor()
