@@ -14,21 +14,31 @@ class PrePro:
 
 
 class Variable:
-    def __init__(self, value):
+    def __init__(self, value, vartype: str):
         self.value = value
+        self.vartype = vartype
 
 
 class SymbolTable:
     def __init__(self):
         self.table = {}
 
+    def create_variable(self, name: str, vartype: str):
+        if name in self.table:
+            raise Exception(f"[Semantic] Variable '{name}' already declared")
+        self.table[name] = Variable(None, vartype)
+
     def get_value(self, name: str):
         if name not in self.table:
             raise Exception(f"[Semantic] Variable '{name}' not defined")
-        return self.table[name].value
+        return self.table[name].value, self.table[name].vartype
 
-    def set_value(self, name: str, value):
-        self.table[name] = Variable(value)
+    def set_value(self, name: str, value, vartype: str):
+        if name not in self.table:
+            raise Exception(f"[Semantic] Variable '{name}' not declared")
+        if self.table[name].vartype != vartype:
+            raise Exception(f"[Semantic] Type mismatch for '{name}': expected {self.table[name].vartype}, got {vartype}")
+        self.table[name].value = value
 
 
 class Lexer:
@@ -49,6 +59,12 @@ class Lexer:
         "then": "OPEN_IF_BRA",
         "do": "OPEN_BRA",
         "end": "CLOSE_BRA",
+        "local": "VAR",
+        "true": "BOOL",
+        "false": "BOOL",
+        "number": "TYPE",
+        "string": "TYPE",
+        "boolean": "TYPE",
     }
 
     def select_next(self):
@@ -95,19 +111,32 @@ class Lexer:
         elif char == ">":
             self.next = Token("GT", ">")
             self.position += 1
+        elif char == '"':
+            self.position += 1
+            s = ""
+            while self.position < len(self.source) and self.source[self.position] != '"':
+                s += self.source[self.position]
+                self.position += 1
+            if self.position >= len(self.source):
+                raise Exception("[Lexer] Unclosed string literal")
+            self.position += 1
+            self.next = Token("STR", s)
         elif char.isdigit():
             num = ""
             while self.position < len(self.source) and self.source[self.position].isdigit():
                 num += self.source[self.position]
                 self.position += 1
             self.next = Token("INT", int(num))
-        elif char.isalpha():
+        elif char.isalpha() or char == "_":
             iden = ""
             while self.position < len(self.source) and (self.source[self.position].isalnum() or self.source[self.position] == "_"):
                 iden += self.source[self.position]
                 self.position += 1
             token_type = Lexer.RESERVED.get(iden, "IDEN")
-            self.next = Token(token_type, iden)
+            if token_type == "BOOL":
+                self.next = Token("BOOL", iden == "true")
+            else:
+                self.next = Token(token_type, iden)
         else:
             raise Exception(f"[Lexer] Invalid symbol '{char}'")
 
@@ -123,47 +152,81 @@ class Node:
 
 class IntVal(Node):
     def evaluate(self, st):
-        return self.value
+        return self.value, "number"
+
+
+class BoolVal(Node):
+    def evaluate(self, st):
+        return self.value, "boolean"
+
+
+class StringVal(Node):
+    def evaluate(self, st):
+        return self.value, "string"
 
 
 class UnOp(Node):
     def evaluate(self, st):
+        val, vartype = self.children[0].evaluate(st)
         if self.value == "+":
-            return +self.children[0].evaluate(st)
+            if vartype != "number":
+                raise Exception("[Semantic] Unary '+' requires number")
+            return +val, "number"
         elif self.value == "-":
-            return -self.children[0].evaluate(st)
+            if vartype != "number":
+                raise Exception("[Semantic] Unary '-' requires number")
+            return -val, "number"
         elif self.value == "not":
-            return not self.children[0].evaluate(st)
+            if vartype != "boolean":
+                raise Exception("[Semantic] 'not' requires boolean")
+            return not val, "boolean"
         else:
             raise Exception(f"[Semantic] Unknown unary operator '{self.value}'")
 
 
 class BinOp(Node):
     def evaluate(self, st):
-        left = self.children[0].evaluate(st)
-        right = self.children[1].evaluate(st)
-        if self.value == "+":
-            return left + right
-        elif self.value == "-":
-            return left - right
-        elif self.value == "*":
-            return left * right
-        elif self.value == "/":
-            if right == 0:
-                raise Exception("[Semantic] Division by zero")
-            return left // right
-        elif self.value == "==":
-            return left == right
-        elif self.value == "<":
-            return left < right
-        elif self.value == ">":
-            return left > right
-        elif self.value == "and":
-            return left and right
-        elif self.value == "or":
-            return left or right
+        left, ltype = self.children[0].evaluate(st)
+        right, rtype = self.children[1].evaluate(st)
+        op = self.value
+
+        if op == "and":
+            if ltype != "boolean" or rtype != "boolean":
+                raise Exception("[Semantic] 'and' requires booleans")
+            return left and right, "boolean"
+        elif op == "or":
+            if ltype != "boolean" or rtype != "boolean":
+                raise Exception("[Semantic] 'or' requires booleans")
+            return left or right, "boolean"
+        elif op in ("==", "<", ">"):
+            if ltype != rtype:
+                raise Exception(f"[Semantic] Type mismatch in '{op}'")
+            if op == "==":
+                return left == right, "boolean"
+            elif op == "<":
+                return left < right, "boolean"
+            else:
+                return left > right, "boolean"
+        elif op == "+":
+            if ltype == "string" and rtype == "string":
+                return left + right, "string"
+            elif ltype == "number" and rtype == "number":
+                return left + right, "number"
+            else:
+                raise Exception(f"[Semantic] '+' cannot operate on {ltype} and {rtype}")
+        elif op in ("-", "*", "/"):
+            if ltype != "number" or rtype != "number":
+                raise Exception(f"[Semantic] '{op}' requires numbers")
+            if op == "-":
+                return left - right, "number"
+            elif op == "*":
+                return left * right, "number"
+            else:
+                if right == 0:
+                    raise Exception("[Semantic] Division by zero")
+                return left // right, "number"
         else:
-            raise Exception(f"[Semantic] Unknown binary operator '{self.value}'")
+            raise Exception(f"[Semantic] Unknown binary operator '{op}'")
 
 
 class Identifier(Node):
@@ -173,12 +236,29 @@ class Identifier(Node):
 
 class Assignment(Node):
     def evaluate(self, st):
-        st.set_value(self.children[0].value, self.children[1].evaluate(st))
+        val, vartype = self.children[1].evaluate(st)
+        st.set_value(self.children[0].value, val, vartype)
+
+
+class VarDec(Node):
+    # value = type string, children[0] = Identifier, children[1] = expr (optional)
+    def evaluate(self, st):
+        name = self.children[0].value
+        st.create_variable(name, self.value)
+        if len(self.children) > 1:
+            val, vartype = self.children[1].evaluate(st)
+            if vartype != self.value:
+                raise Exception(f"[Semantic] Type mismatch in declaration of '{name}': expected {self.value}, got {vartype}")
+            st.set_value(name, val, vartype)
 
 
 class Print(Node):
     def evaluate(self, st):
-        print(self.children[0].evaluate(st))
+        val, vartype = self.children[0].evaluate(st)
+        if vartype == "boolean":
+            print("true" if val else "false")
+        else:
+            print(val)
 
 
 class Block(Node):
@@ -194,12 +274,15 @@ class NoOp(Node):
 
 class Read(Node):
     def evaluate(self, st):
-        return int(input())
+        return int(input()), "number"
 
 
 class If(Node):
     def evaluate(self, st):
-        if self.children[0].evaluate(st):
+        val, vartype = self.children[0].evaluate(st)
+        if vartype != "boolean":
+            raise Exception("[Semantic] 'if' condition must be boolean")
+        if val:
             self.children[1].evaluate(st)
         elif len(self.children) > 2:
             self.children[2].evaluate(st)
@@ -207,7 +290,12 @@ class If(Node):
 
 class While(Node):
     def evaluate(self, st):
-        while self.children[0].evaluate(st):
+        while True:
+            val, vartype = self.children[0].evaluate(st)
+            if vartype != "boolean":
+                raise Exception("[Semantic] 'while' condition must be boolean")
+            if not val:
+                break
             self.children[1].evaluate(st)
 
 
@@ -233,6 +321,14 @@ class Parser:
             return node
         elif Parser.lexer.next.type == "INT":
             node = IntVal(Parser.lexer.next.value, [])
+            Parser.lexer.select_next()
+            return node
+        elif Parser.lexer.next.type == "BOOL":
+            node = BoolVal(Parser.lexer.next.value, [])
+            Parser.lexer.select_next()
+            return node
+        elif Parser.lexer.next.type == "STR":
+            node = StringVal(Parser.lexer.next.value, [])
             Parser.lexer.select_next()
             return node
         elif Parser.lexer.next.type == "IDEN":
@@ -304,6 +400,25 @@ class Parser:
             Parser.lexer.select_next()
             return NoOp(None, [])
 
+        elif Parser.lexer.next.type == "VAR":
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type != "IDEN":
+                raise Exception(f"[Parser] Expected identifier after 'local' but got {Parser.lexer.next.type}")
+            iden = Identifier(Parser.lexer.next.value, [])
+            Parser.lexer.select_next()
+            if Parser.lexer.next.type != "TYPE":
+                raise Exception(f"[Parser] Expected type after identifier but got {Parser.lexer.next.type}")
+            vartype = Parser.lexer.next.value
+            Parser.lexer.select_next()
+            node = VarDec(vartype, [iden])
+            if Parser.lexer.next.type == "ASSIGN":
+                Parser.lexer.select_next()
+                node.children.append(Parser.parse_bool_expression())
+            if Parser.lexer.next.type != "END":
+                raise Exception(f"[Parser] Expected newline but got {Parser.lexer.next.type}")
+            Parser.lexer.select_next()
+            return node
+
         elif Parser.lexer.next.type == "IF":
             Parser.lexer.select_next()
             if Parser.lexer.next.type != "OPEN_PAR":
@@ -374,7 +489,7 @@ class Parser:
                 raise Exception(f"[Parser] Expected newline but got {Parser.lexer.next.type}")
             Parser.lexer.select_next()
             return Print(None, [expr])
-        
+
         elif Parser.lexer.next.type == "OPEN_BRA":
             Parser.lexer.select_next()
             block = Parser.parse_block()
